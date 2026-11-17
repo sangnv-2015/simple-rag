@@ -17,8 +17,8 @@ class RestructurerTest < Minitest::Test
                  "Nghỉ cưới: 3 ngày. Nghỉ tang: 5 ngày. Phép năm: 12 ngày.")
   end
 
-  def test_list_marker_does_not_cover_lost_number
-    refute keep?("Nghỉ 2 ngày", "1. Nghỉ 3 ngày\n2. Khác")
+  def test_list_marker_covers_only_one_occurrence
+    refute keep?("Nghỉ 2 ngày, 2 buổi", "1. Nghỉ 3 ngày\n2. Khác")
   end
 
   def test_call_returns_markdown_when_numbers_kept
