@@ -23,3 +23,25 @@ Check [4] was loosened by controller ruling from ">=2 spaces" to a same-line mat
 ## Chosen values
 - `MAX_CHUNK_CHARS` = 1000 (252 tokens, well under the 450 limit).
 - Image `app` size: 1.04GB.
+
+## Task 12: first real end-to-end run (real endpoint, model `Xenova/multilingual-e5-small` dim 384, real Postgres)
+- Ingest (all three files in one `bin/ingest` call; per-file wall time was not measured, the model download plus the whole first run was not timed). Pages / chunks / pages that fell back to raw text (number check):
+  - quy-che-nghi-phep.pdf: 4 pages, 8 chunks, 0 fallback
+  - quy-dinh-lam-viec-tu-xa.docx: 4 pages, 7 chunks, 0 fallback
+  - travel-expense-policy.pdf: 4 pages, 7 chunks, 0 fallback
+  - Second `bin/ingest`: `Bỏ qua (không đổi):` all 3 files, 2.1 s wall (includes container start).
+- `bin/check_retrieval` (rank of the chunk holding the answer, top 6): ranks 1,1,1,2,1,1,1,1,1,1 (only the fever/9 giờ question is rank 2). Score **10/10 in top 6**, exit 0. The e5-base fallback was not needed.
+- `bin/ask` times: seconds from process start (includes ~2 s container and model start) to first output byte, then total.
+  - "Ngày phép năm ngoái dùng không hết thì được giữ lại sang năm nay mấy ngày?" (first byte 3.3 s, total 4.8 s):
+    ```
+    Theo quy chế, ngày phép chưa dùng hết trong năm được chuyển tối đa 5 ngày sang năm kế tiếp [S1]. Số ngày được chuyển phải được sử dụng trước ngày 31/03 của năm kế tiếp, quá hạn sẽ tự động hết hiệu lực và không được quy đổi thành tiền [S1].
+    [1] quy-che-nghi-phep.pdf · trang 2 — "Ngày phép chưa dùng hết trong năm được chuyển tối đa 5 ngày sang năm kế tiếp. Số ngày được chuyển phải được sử dụng trước ngày 31/03 của năm kế tiếp, quá hạn sẽ tự động hết hiệu lực và không được quy đổi thành tiền."
+    ```
+    quote verified.
+  - Table question "What is the hotel limit per night in a Tier 1 city?" (first byte 2.9 s, total 3.5 s):
+    ```
+    The hotel cap per night in a Tier 1 city is USD 140 [S1].
+    [1] travel-expense-policy.pdf · trang 2 — "Tier 1 (capital cities and major financial centres) | USD 140 per night | USD 60 per day"
+    ```
+    quote verified (table row kept as markdown cells).
+  - Unanswerable "Công ty thưởng Tết bao nhiêu tháng lương?" (3.1 s / 3.5 s) and "Does the company pay for employees' gym memberships?" (3.3 s / 3.6 s): terminal shows only `Không tìm thấy thông tin này trong tài liệu.` (the model answered NOT_FOUND, nothing was streamed).

@@ -1,0 +1,13 @@
+#!/usr/bin/env ruby
+$LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
+require "rag"
+
+begin
+  sys = Rag.build
+rescue Rag::ConfigError => e
+  warn e.message
+  exit 2
+end
+paths = ARGV.empty? ? [sys.config.documents_dir] : ARGV
+reports = paths.map { |p| sys.ingest.call(p).tap { |r| puts r.summary } }
+exit(reports.any?(&:failed?) ? 1 : 0)
