@@ -50,6 +50,31 @@ class ChunkerTest < Minitest::Test
     assert_equal para.gsub(/\s/, ""), chunks.join.gsub(/\s/, "")
   end
 
+  def test_oversize_paragraph_split_keeps_word_boundaries_across_lines
+    long = Array.new(15) { "wordwordw" }.join(" ") # 10-char stride: the hard cut lands on a space
+    para = long + "\nshort line"
+    chunks = split(para)
+    assert chunks.all? { |c| c.size <= 100 }
+    assert_equal para.split, chunks.join(" ").split
+  end
+
+  def test_oversize_paragraph_split_keeps_word_boundaries_across_sentences
+    long = Array.new(15) { "wordwordw" }.join(" ")
+    para = long + ". Next sentence here."
+    chunks = split(para)
+    assert chunks.all? { |c| c.size <= 100 }
+    assert_equal para.split, chunks.join(" ").split
+  end
+
+  def test_heading_is_not_left_alone_before_oversize_paragraph
+    para = (1..40).map { |i| "w#{i}." }.join(" ")
+    assert para.size > 100
+    chunks = split("# Điều 5\n#{para}")
+    assert chunks.size > 1
+    assert chunks[0].start_with?("# Điều 5")
+    assert chunks.none? { |c| c.lines.all? { |l| l.strip.empty? || l.start_with?("#") } }
+  end
+
   def test_vietnamese_text_is_unchanged
     text = "Nhân viên được nghỉ phép năm 12 ngày.\nThời gian thử việc tối đa 60 ngày."
     assert_equal [text], split(text)

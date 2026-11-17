@@ -7,9 +7,10 @@ module Rag
       cur = +""
       only_headings = true
       blocks(text).each do |kind, body|
-        pieces = kind == :para ? pieces(body, max_chars) : [body]
+        pieces = kind == :para ? pieces(body, max_chars).map(&:strip).reject(&:empty?) : [body]
         pieces.each do |piece|
-          if !cur.empty? && ((kind == :heading && !only_headings) || cur.size + SEP.size + piece.size > max_chars)
+          # Headings always merge into what follows, so a heading-only chunk may exceed max_chars.
+          if !cur.empty? && !only_headings && (kind == :heading || cur.size + SEP.size + piece.size > max_chars)
             chunks << cur
             cur = +""
             only_headings = true
@@ -55,6 +56,7 @@ module Rag
     end
 
     # Split an oversize paragraph on line ends, then sentence ends, then hard-cut.
+    # Pieces keep their trailing whitespace; the caller strips the final result.
     def self.pieces(text, max)
       return [text] if text.size <= max
 
@@ -66,7 +68,7 @@ module Rag
         packed << +"" if packed.last.size + u.size > max
         packed.last << u
       end
-      packed.map(&:strip).reject(&:empty?)
+      packed
     end
   end
 end
