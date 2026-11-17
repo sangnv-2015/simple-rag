@@ -45,13 +45,43 @@ class ExtractTest < Minitest::Test
     end
   end
 
+  def rag_tmpdirs = Dir.glob(File.join(Dir.tmpdir, "rag-docx*")).sort
+
   def test_garbage_docx_raises_extract_error
     Dir.mktmpdir do |d|
       path = File.join(d, "x.docx")
       File.binwrite(path, Random.bytes(500))
-      before = Dir.glob(File.join(Dir.tmpdir, "d*")).sort
       assert_raises(Rag::Extract::Error) { Rag::Extract.pages(path) }
-      assert_equal before, Dir.glob(File.join(Dir.tmpdir, "d*")).sort
+    end
+  end
+
+  # soffice imports PK+random bytes as a text "document" (no error), so only cleanup is asserted.
+  def test_pk_prefixed_garbage_docx_leaves_no_temp_dir
+    Dir.mktmpdir do |d|
+      path = File.join(d, "x.docx")
+      File.binwrite(path, "PK" + Random.bytes(500))
+      before = rag_tmpdirs
+      begin
+        Rag::Extract.pages(path)
+      rescue Rag::Extract::Error
+        nil
+      end
+      assert_equal before, rag_tmpdirs
+    end
+  end
+
+  def test_successful_docx_leaves_no_temp_dir
+    docx = OfficeFixtures.docx(LINES)
+    before = rag_tmpdirs
+    Rag::Extract.pages(docx)
+    assert_equal before, rag_tmpdirs
+  end
+
+  def test_missing_files_raise_extract_error
+    Dir.mktmpdir do |d|
+      %w[x.pdf x.docx].each do |name|
+        assert_raises(Rag::Extract::Error) { Rag::Extract.pages(File.join(d, name)) }
+      end
     end
   end
 

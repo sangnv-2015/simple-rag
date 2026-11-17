@@ -7,6 +7,7 @@ module Rag
 
     def self.pages(path)
       path = File.expand_path(path)
+      raise Error, "Không đọc được tệp #{File.basename(path)}." unless File.readable?(path)
       case File.extname(path).downcase
       when ".pdf" then pdf_pages(path)
       when ".docx"
@@ -35,7 +36,7 @@ module Rag
     end
 
     def self.pdf_pages(path, name = File.basename(path))
-      out = run("pdftotext", "-layout", path, "-", name: name)
+      out = run("timeout", "120", "pdftotext", "-layout", path, "-", name: name)
       split_pages(out.force_encoding("UTF-8").scrub(""))
     end
 
