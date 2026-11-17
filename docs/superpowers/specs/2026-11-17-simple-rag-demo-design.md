@@ -217,7 +217,7 @@ Tất cả là lựa chọn của người thiết kế dựa trên hai bản tr
 | Đổi .docx → PDF | LibreOffice trong container (`libreoffice-writer-nogui`, `fonts-noto-core`) | Chỉ PDF đã dựng trang mới có số trang thật |
 | Rút chữ từ PDF | `pdftotext -layout` (gói `poppler-utils`), chạy một lần mỗi file, tách trang theo ký tự `\f` | Chuẩn hóa Unicode về NFC và khoảng trắng. Trang có dưới khoảng 20 chữ cái coi là không có lớp chữ (ngưỡng ước lượng) |
 | Gọi DeepSeek từ Ruby, hiện dần | `Net::HTTP` thuần, gọi `/chat/completions` kiểu OpenAI, tự đọc SSE (bỏ dòng bắt đầu bằng `:`, dừng ở `[DONE]`) | Không thêm gem: ít rủi ro nhất với endpoint nội bộ. `ruby-openai` tự nối `/v1` vào địa chỉ nên dễ lệch với gateway |
-| Mô hình DeepSeek cho bước dựng lại và bước trả lời | `deepseek-flash`, tắt chế độ suy nghĩ (`thinking: {type: "disabled"}`) | Tên mô hình đổi được qua biến môi trường. Chat chỉ nhận chữ, không nhận PDF |
+| Mô hình DeepSeek cho bước dựng lại và bước trả lời | `deepseek-flash`, tắt chế độ suy nghĩ bằng `reasoning: {enabled: false}` | Tên mô hình đổi được qua biến môi trường. Chat chỉ nhận chữ, không nhận PDF. Endpoint công ty là cổng LiteLLM trước OpenRouter: nó từ chối trường `thinking` của DeepSeek gốc (HTTP 400) và nhận `reasoning: {enabled: false}` (đã đo: chữ đầu tiên sau 1,5 giây, so với 6,8 giây khi để suy nghĩ). Người dùng đã duyệt đổi này. Nếu sau này gọi thẳng DeepSeek thì đổi lại thành `thinking: {type: "disabled"}` |
 | Trích nguồn | Các đoạn gửi đi đánh số `[S1]`, `[S2]`… kèm tên file và trang; mô hình chép nguyên văn đoạn trích cho từng ý; câu cố định `NOT_FOUND` khi không có câu trả lời | DeepSeek không có tính năng trích nguồn. Không dùng JSON mode cho câu trả lời, để còn hiện dần được |
 | Tạo vector | gem `informers ~> 1.3`, mô hình `Xenova/multilingual-e5-small` (q8, 384 chiều, khoảng 118 MB, có tiếng Việt) | Bắt buộc thêm tiền tố `"passage: "` cho đoạn và `"query: "` cho câu hỏi. Mô hình tải một lần và giữ trong volume |
 | Kho lưu | Postgres `pgvector/pgvector:pg18-trixie`, gem `pg` + `pgvector`, cột `vector(384)`, khoảng cách cosine | Không dùng `neighbor` vì nó chỉ dành cho Rails |
@@ -229,7 +229,7 @@ dừng lại và hỏi người dùng, không tự đổi thành phần.
 **Chưa được kiểm chứng, người build phải thử sớm (trước khi xây phần còn lại):**
 
 1. Endpoint DeepSeek của công ty: gọi được `/chat/completions`; tên mô hình `deepseek-flash`
-   có tồn tại ở đó không; có chuyển tiếp trường `thinking` không; có hiện dần từng phần
+   có tồn tại ở đó không; có tắt được chế độ suy nghĩ không; có hiện dần từng phần
    hay gom lại rồi mới trả. Mọi mô tả API ở trên là của DeepSeek công khai, chưa thử trên
    endpoint này.
 2. `informers` chạy được bản q8 của `multilingual-e5-small` trên cả amd64 và arm64.

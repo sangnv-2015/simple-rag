@@ -15,7 +15,7 @@
 - Ruby, Docker on macOS laptop, amd64 and arm64. Base image `ruby:3.4-slim-trixie`. **Every test or verify command is `docker compose ...`; assume no host Ruby.**
 - Only one external service: DeepSeek, configured in `.env` (never committed): `DEEPSEEK_API_KEY`, `DEEPSEEK_API_BASE`, `DEEPSEEK_MODEL` (default `deepseek-flash`). **Never print, log, or commit the key.** Do not run `docker compose config`, `printenv`, or `cat .env` (they expose it). `.env` is gitignored and in `.dockerignore`; `.env.example` is committed.
 - No gems beyond: `informers ~> 1.3`, `pg`, `pgvector`, `sinatra ~> 4.2`, `puma`, `rackup`, minitest. No `neighbor`, no `ruby-openai`, no markdown or HTTP gem.
-- DeepSeek: `Net::HTTP`, `POST {DEEPSEEK_API_BASE}/chat/completions` (OpenAI style), body includes `thinking: {type: "disabled"}`; read SSE yourself (skip lines starting with `:`, stop at `[DONE]`). Chat takes text only.
+- DeepSeek: `Net::HTTP`, `POST {DEEPSEEK_API_BASE}/chat/completions` (OpenAI style), body includes `thinking: {type: "disabled"}`; read SSE yourself (skip lines starting with `:`, stop at `[DONE]`). Chat takes text only. The company endpoint is a LiteLLM gateway in front of OpenRouter: it returns HTTP 400 for the DeepSeek-native `thinking` field and for `reasoning_effort`; `reasoning: {enabled: false}` is the spelling it accepts (measured in Task 1, approved by the human).
 - Embeddings: `Xenova/multilingual-e5-small`, `dtype: "q8"`, 384 dims, prefix `"passage: "` for chunks and `"query: "` for questions. Model name and dimension are each defined once (`Rag::EMBED_MODEL`, `Rag::EMBED_DIM`) so they can be switched to `multilingual-e5-base` / 768.
 - Store: `vector(384)` column, cosine distance (`<=>`), exact scan (no index).
 - Page numbers are 1-based PDF page numbers. For `.docx` sources the UI says `trang N (bản PDF)`.
@@ -266,7 +266,7 @@ git commit -m "feat: extract per-page text from pdf and docx"
 - [ ] **Step 1: Write the failing tests** (all against `FakeSSEServer`)
 ```ruby
 def test_non_stream_returns_content_and_sends_expected_request
-  # asserts: path "/v1/chat/completions" for base ".../v1", Authorization "Bearer k", body["thinking"] == {"type"=>"disabled"}, body["model"], no "stream" key
+  # asserts: path "/v1/chat/completions" for base ".../v1", Authorization "Bearer k", body["reasoning"] == {"enabled"=>false}, no "thinking" key, body["model"], no "stream" key
 def test_stream_yields_deltas_in_order_and_returns_concatenation  # "Xin ", "chào" -> yielded ["Xin ", "chào"], returns "Xin chào"
 def test_stream_ignores_comments_empty_choices_null_content_and_reasoning  # ": keep-alive", {"choices":[]}, delta content nil, delta reasoning_content only
 def test_stream_json_line_split_across_tcp_writes_and_crlf
