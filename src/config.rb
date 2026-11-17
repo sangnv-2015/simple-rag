@@ -18,13 +18,14 @@ module Rag
     def pretty_print(q) = q.text(inspect) # pp ignores inspect on Structs
   end
 
-  System = Struct.new(:config, :store, :ingest, :ask)
+  System = Struct.new(:config, :store, :ingest, :ask, :retriever)
 
   def self.build(config = Config.from_env)
     store = Store.new(config.database_url)
     store.migrate!
     embedder = Embedder.new
     llm = DeepSeek.new(api_key: config.api_key, base_url: config.api_base, model: config.model)
-    System.new(config, store, Ingest.new(llm: llm, embedder: embedder, store: store), Ask.new(llm: llm, embedder: embedder, store: store))
+    System.new(config, store, Ingest.new(llm: llm, embedder: embedder, store: store), Ask.new(llm: llm, embedder: embedder, store: store),
+               Retriever.new(embedder: embedder, store: store, k: TOP_K))
   end
 end

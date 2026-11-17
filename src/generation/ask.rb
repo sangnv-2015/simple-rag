@@ -49,22 +49,36 @@ module Rag
       end
     end
 
-    def initialize(llm:, embedder:, store:, k: Rag::TOP_K)
-      @llm, @retriever = llm, Retriever.new(embedder: embedder, store: store, k: k)
+    def initialize(llm:, embedder:, store:, k: Rag::TOP_K, min_score: Rag::MIN_SCORE)
+      @llm, @store, @min_score = llm, store, min_score
+      @retriever = Retriever.new(embedder: embedder, store: store, k: k)
     end
 
-    def call(question, history = [], &on_delta)
+    def call(question, history = [], tenant_id: Rag::DEFAULT_TENANT, document_ids: [], source: "cli", &on_delta)
       return Answer.new("", false, []) if Text.squash(question).empty?
       standalone = history.empty? ? question : rewrite(history, question)
-      hits = @retriever.call(standalone)
-      return Answer.new("", false, [], standalone) if hits.empty?
-      filter = on_delta && Filter.new(on_delta)
-      reply = @llm.chat([{ role: "user", content: Prompts.answer(standalone, hits) }], &filter&.method(:push))
-      filter&.finish
-      parse(reply, hits, standalone)
+      hits = @retriever.call(standalone, tenant_id: tenant_id, document_ids: document_ids)
+      answer = if hits.empty? || hits.first.score < @min_score
+        Answer.new("", false, [], standalone, hits)
+      else
+        filter = on_delta && Filter.new(on_delta)
+        reply = @llm.chat([{ role: "user", content: Prompts.answer(standalone, hits) }], &filter&.method(:push))
+        filter&.finish
+        parse(reply, hits, standalone)
+      end
+      log(answer, question, tenant_id, document_ids, source)
+      answer
     end
 
     private
+
+    def log(answer, question, tenant_id, document_ids, source)
+      @store.log_query(tenant_id: tenant_id, question: question, standalone: answer.standalone, document_ids: document_ids,
+                       retrieved_chunk_ids: answer.hits.map(&:chunk_id), scores: answer.hits.map(&:score), status: answer.status,
+                       answer: answer.text, cited_chunk_ids: answer.sources.map(&:chunk_id), source: source)
+    rescue StandardError => e
+      warn "query log failed: #{e.class}"
+    end
 
     def rewrite(history, question)
       standalone = Text.squash(@llm.chat([{ role: "user", content: Prompts.rewrite(history, question) }]))
@@ -74,7 +88,7 @@ module Rag
     def parse(reply, hits, standalone)
       text, quotes = reply.split(TOKEN, 2)
       text = (text || "").then { |t| quotes ? t.rstrip : t }
-      return Answer.new(text, false, [], standalone) if text.include?(NOT_FOUND)
+      return Answer.new(text, false, [], standalone, hits) if text.include?(NOT_FOUND)
       cited = text.scan(/\[S(\d+)\]/).flatten.map(&:to_i).uniq.select { |n| n.between?(1, hits.size) }
       quoted = {}
       # A quote may span several lines (table rows), so an entry runs until the next line starting with [S<n>].
@@ -86,9 +100,10 @@ module Rag
       sources = cited.map do |n|
         q = quoted[n] && Text.comparable(quoted[n])
         ok = q && q.size >= Rag::MIN_QUOTE_CHARS && Text.comparable(hits[n - 1].text).include?(q)
-        Source.new(n, hits[n - 1].filename, hits[n - 1].page, ok ? q : nil)
+        h = hits[n - 1]
+        Source.new(n, h.filename, h.page, ok ? q : nil, h.chunk_id, h.document_id, h.title, h.version)
       end
-      Answer.new(text, !sources.empty?, sources, standalone)
+      Answer.new(text, !sources.empty?, sources, standalone, hits)
     end
   end
 end

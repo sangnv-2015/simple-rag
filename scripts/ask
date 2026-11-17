@@ -25,7 +25,7 @@ end
 if answer.found
   puts
   answer.sources.each do |s|
-    puts "[#{s.n}] #{s.filename} · trang #{s.page}#{s.quote ? " — \"#{s.quote}\"" : " — không xác minh được đoạn trích"}"
+    puts "[#{s.n}] #{s.title} v#{s.version} · trang #{s.page}#{s.quote ? " — \"#{s.quote}\"" : " — không xác minh được đoạn trích"}"
   end
 else
   # Streamed text (if any) is not erased: the not-found line goes on its own line after it.

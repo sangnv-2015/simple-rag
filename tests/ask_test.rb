@@ -26,16 +26,19 @@ class AskTest < Minitest::Test
     @store.finish_document(id, pages: [], chunks: [Rag::Chunk.new(page: page, position: 0, text: text, embedding: @embedder.embed_query(text))])
   end
 
-  def ask(reply, question = Q, &on_delta)
+  def ask(reply, question = Q, **opts, &on_delta)
     @llm = FakeLLM.new { reply }
-    Rag::Ask.new(llm: @llm, embedder: @embedder, store: @store).call(question, &on_delta)
+    Rag::Ask.new(llm: @llm, embedder: @embedder, store: @store, min_score: opts.delete(:min_score) || -1.0).call(question, [], **opts, &on_delta)
   end
 
   def reply(quote_line = "[S1] #{QUOTE}", answer = "Hoàn tiền trong 14 ngày [S1].")
     "#{answer}\n<<QUOTES>>\n#{quote_line}"
   end
 
-  def src(quote) = Rag::Source.new(1, "a.pdf", 3, quote)
+  def src(quote)
+    d = by_name(@store, "a.pdf")
+    Rag::Source.new(1, "a.pdf", 3, quote, @store.chunks(d.id).first.id, d.id, d.title, d.version)
+  end
 
   def test_answer_with_verified_quote_and_sources
     a = ask(reply)
@@ -306,13 +309,98 @@ class AskTest < Minitest::Test
     assert_equal [src(nil)], a.sources
   end
 
+  def test_below_min_score_returns_not_enough_without_calling_llm
+    a = ask(reply, CHUNK, min_score: 1.1)
+    refute a.found
+    assert_empty @llm.calls
+    assert_equal 1, a.hits.size
+    assert_equal "not_enough_information", a.status
+  end
+
+  def test_score_equal_to_min_score_still_goes_to_the_llm
+    score = @store.search(@embedder.embed_query(CHUNK), 1, tenant_id: "nus").first.score
+    assert ask(reply, CHUNK, min_score: score).found
+    assert_equal 1, @llm.calls.size
+  end
+
+  def test_no_hits_returns_not_enough_without_llm
+    @store = FakeStore.new
+    a = ask(reply)
+    assert_empty a.hits
+    assert_empty @llm.calls
+  end
+
+  def test_tenant_scope_other_tenant_chunk_never_reaches_prompt
+    @store = FakeStore.new
+    id = @store.start_document(**TestMeta.attrs("x.pdf", tenant_id: "acme", sha256: "hx"))
+    @store.finish_document(id, pages: [], chunks: [Rag::Chunk.new(page: 1, position: 0, text: CHUNK, embedding: @embedder.embed_query(CHUNK))])
+    refute ask(reply, tenant_id: "nus").found
+    assert_empty @llm.calls
+    assert ask(reply, tenant_id: "acme").found
+  end
+
+  def test_document_ids_scope_excludes_unselected_document_from_prompt
+    add("b.pdf", 1, "Nội dung riêng của tài liệu b về hoàn tiền")
+    ask(reply, document_ids: [by_name(@store, "a.pdf").id])
+    c = @llm.calls.last[:messages].last[:content]
+    assert_includes c, "file=a.pdf"
+    refute_includes c, "file=b.pdf"
+  end
+
+  def test_foreign_or_unknown_document_id_returns_not_enough
+    @store = FakeStore.new
+    id = @store.start_document(**TestMeta.attrs("x.pdf", tenant_id: "acme", sha256: "hx"))
+    @store.finish_document(id, pages: [], chunks: [Rag::Chunk.new(page: 1, position: 0, text: CHUNK, embedding: @embedder.embed_query(CHUNK))])
+    [[id], [9999]].each do |ids|
+      refute ask(reply, tenant_id: "nus", document_ids: ids).found
+    end
+    assert_empty @llm.calls
+  end
+
+  def test_citation_carries_chunk_id_of_the_hit
+    a = ask(reply)
+    assert_equal a.hits.first.chunk_id, a.sources.first.chunk_id
+    assert_equal "a.pdf", a.sources.first.title
+  end
+
+  def test_every_ask_writes_one_query_log_row
+    a = ask(reply, document_ids: [by_name(@store, "a.pdf").id], source: "api")
+    row = @store.query_logs.first
+    assert_equal 1, @store.query_logs.size
+    assert_equal ["nus", Q, Q, [by_name(@store, "a.pdf").id], "answered", a.text, "api"],
+                 row.values_at("tenant_id", "question", "standalone", "document_ids", "status", "answer", "source")
+    assert_equal [a.hits.first.chunk_id], row["retrieved_chunk_ids"]
+    assert_equal [a.hits.first.score], row["scores"]
+    assert_equal [a.hits.first.chunk_id], row["cited_chunk_ids"]
+    ask(reply, CHUNK, min_score: 1.1)
+    assert_equal "not_enough_information", @store.query_logs.first["status"]
+    assert_equal [], @store.query_logs.first["cited_chunk_ids"]
+    ask("NOT_FOUND")
+    assert_equal 3, @store.query_logs.size
+    assert_equal "not_enough_information", @store.query_logs.first["status"]
+    assert_equal "cli", @store.query_logs.first["source"]
+  end
+
+  def test_blank_question_writes_no_log
+    ask("x", " ")
+    assert_empty @store.query_logs
+  end
+
+  def test_log_failure_does_not_fail_the_answer
+    @store.define_singleton_method(:log_query) { |**| raise "db down" }
+    a = nil
+    _, err = capture_io { a = ask(reply) }
+    assert a.found
+    assert_includes err, "query log failed"
+  end
+
   HIST = [{ q: "Hủy vé?", a: "Được." }].freeze
   FOLLOW = "còn hoàn tiền?"
 
   def ask_with_history(history, replies, question = FOLLOW, &on_delta)
     i = -1
     @llm = FakeLLM.new { replies[[i += 1, replies.size - 1].min] }
-    Rag::Ask.new(llm: @llm, embedder: @embedder, store: @store).call(question, history, &on_delta)
+    Rag::Ask.new(llm: @llm, embedder: @embedder, store: @store, min_score: -1.0).call(question, history, &on_delta)
   end
 
   def test_no_history_makes_one_llm_call
