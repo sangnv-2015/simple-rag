@@ -1,5 +1,6 @@
 require "test_helper"
 require "tmpdir"
+require "socket"
 
 class ExtractTest < Minitest::Test
   LINES = Array.new(150) { |i| "Quy định nghỉ phép năm số #{i} của công ty" }.join("\n")
@@ -47,6 +48,20 @@ class ExtractTest < Minitest::Test
       File.binwrite(path, Random.bytes(500))
       assert_raises(Rag::Extract::Error) { Rag::Extract.pages(path) }
     end
+  end
+
+  # LibreOffice fetches linked images while converting unless the profile blocks it.
+  def test_docx_with_external_image_link_makes_no_network_request
+    server = TCPServer.new("127.0.0.1", 0)
+    hits = Queue.new
+    t = Thread.new { loop { c = server.accept; hits << 1; c.close } }
+    docx = OfficeFixtures.docx_with_linked_image("http://127.0.0.1:#{server.addr[1]}/x.png")
+    pages = Rag::Extract.pages(docx)
+    assert_includes pages.first.raw_text, "Tài liệu có ảnh liên kết ngoài"
+    assert_equal 0, hits.size
+  ensure
+    t&.kill
+    server&.close
   end
 
   def test_pdftotext_is_bounded_by_the_page_cap

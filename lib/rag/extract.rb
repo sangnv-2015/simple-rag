@@ -1,5 +1,6 @@
 require "open3"
 require "tmpdir"
+require "fileutils"
 
 module Rag
   module Extract
@@ -14,7 +15,7 @@ module Rag
         # soffice happily imports garbage as plain text, so check the zip magic first.
         raise Error, "Không đọc được tệp #{File.basename(path)}." unless File.binread(path, 2) == "PK"
         Dir.mktmpdir("rag-docx") do |dir|
-          run("timeout", "120", "soffice", "--headless", "-env:UserInstallation=file:///tmp/lo-profile",
+          run("timeout", "120", "soffice", "--headless", "-env:UserInstallation=#{profile_url}",
               "--convert-to", "pdf", "--outdir", dir, path)
           converted = File.join(dir, "#{File.basename(path, '.*')}.pdf")
           raise Error, "Không chuyển được tệp #{File.basename(path)} sang PDF." unless File.exist?(converted)
@@ -23,6 +24,28 @@ module Rag
       else
         raise Error, "Chỉ hỗ trợ tệp .pdf và .docx."
       end
+    end
+
+    # New directory name on purpose: an older profile may already hold a registrymodifications.xcu without these settings.
+    PROFILE_DIR = "/tmp/lo-profile-safe".freeze
+    # A hostile document can link remote images; without this LibreOffice fetches them while converting.
+    PROFILE_SETTINGS = <<~XML.freeze
+      <?xml version="1.0" encoding="UTF-8"?>
+      <oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+      <item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="BlockUntrustedRefererLinks" oor:op="fuse"><value>true</value></prop></item>
+      <item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="MacroSecurityLevel" oor:op="fuse"><value>3</value></prop></item>
+      </oor:items>
+    XML
+
+    # The -env:UserInstallation value for every soffice run; seeds the locked-down profile first.
+    def self.profile_url
+      file = File.join(PROFILE_DIR, "user", "registrymodifications.xcu")
+      unless File.exist?(file)
+        FileUtils.mkdir_p(File.dirname(file))
+        File.write("#{file}.#{Process.pid}", PROFILE_SETTINGS)
+        File.rename("#{file}.#{Process.pid}", file)
+      end
+      "file://#{PROFILE_DIR}"
     end
 
     def self.split_pages(raw)
