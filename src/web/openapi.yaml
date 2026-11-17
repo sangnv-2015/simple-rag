@@ -176,6 +176,12 @@ paths:
               example: { id: 3, status: processing }
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "413":
+          description: Upload over the 30 MB cap.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: "request body too large" }
         "422":
           description: Invalid metadata or a rejected file.
           content:

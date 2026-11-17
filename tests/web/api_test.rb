@@ -98,14 +98,15 @@ class ApiTest < Minitest::Test
     c = json(call("GET", "/api/documents/#{id}/chunks"))["chunks"]
     assert_equal [[0, 2, TEXT]], c.map { |x| [x["chunk_index"], x["page"], x["text"]] }
     assert c.first["id"]
-    assert_equal 404, call("GET", "/api/documents/#{id}/chunks", tenant: "acme").status
+    r = call("GET", "/api/documents/#{id}/chunks", tenant: "acme")
+    assert_equal [404, { "error" => "document not found" }], [r.status, json(r)]
     assert_equal 404, call("GET", "/api/documents/abc/chunks").status
   end
 
   def test_delete_cross_tenant_keeps_data
     id = add("A")
     r = call("DELETE", "/api/documents/#{id}", tenant: "acme")
-    assert_equal 404, r.status
+    assert_equal [404, { "error" => "document not found" }], [r.status, json(r)]
     assert @store.document(id)
   end
 
@@ -303,7 +304,7 @@ class ApiTest < Minitest::Test
   end
 
   def test_unknown_api_path_is_json_404
-    r = call("GET", "/api/nope")
+    r = call("GET", "/api/zzz")
     assert_equal [404, "application/json", { "error" => "not found" }], [r.status, r.content_type, json(r)]
   end
 end

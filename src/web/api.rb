@@ -108,6 +108,7 @@ module WebApi
 
     app.not_found do
       next unless request.path_info.start_with?("/api/")
+      next if body.is_a?(Array) ? !body.join.empty? : !body.to_s.empty? # keep bodies set by fail!(404, ...)
       content_type :json
       JSON.generate(error: "not found")
     end
