@@ -29,7 +29,7 @@ services:
       - "127.0.0.1:4567:4567"
     volumes:
       - .:/app:ro
-      - ./documents:/app/documents
+      - ./data/raw:/app/data/raw
       - models:/cache
     depends_on:
       db:

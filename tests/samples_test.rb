@@ -2,8 +2,8 @@ require "test_helper"
 require "yaml"
 
 class SamplesTest < Minitest::Test
-  MANIFEST = YAML.safe_load_file("samples/manifest.yml", symbolize_names: true)
-  QUESTIONS = YAML.safe_load_file("samples/questions.yml", symbolize_names: true)
+  MANIFEST = YAML.safe_load_file("data/samples/manifest.yml", symbolize_names: true)
+  QUESTIONS = YAML.safe_load_file("evaluation/questions.yml", symbolize_names: true)
 
   def preloaded = MANIFEST.select { |m| m[:preload] }
 
@@ -17,8 +17,8 @@ class SamplesTest < Minitest::Test
     assert_equal %w[.docx .pdf], preloaded.map { |m| File.extname(m[:out]) }.uniq.sort
     others = MANIFEST.reject { |m| m[:preload] }
     assert_equal 1, others.size
-    refute others.first[:out].start_with?("documents/")
-    assert preloaded.all? { |m| m[:out].start_with?("documents/") }
+    refute others.first[:out].start_with?("data/raw/")
+    assert preloaded.all? { |m| m[:out].start_with?("data/raw/") }
   end
 
   def test_every_sample_has_three_readable_pages

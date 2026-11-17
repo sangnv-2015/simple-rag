@@ -1,5 +1,5 @@
 #!/usr/bin/env ruby
-# Source of truth for documents/ and samples/upload-demo/: HTML -> docx (-> pdf). Never edit the binaries by hand.
+# Source of truth for data/raw/ and data/samples/upload-demo/: HTML -> docx (-> pdf). Never edit the binaries by hand.
 require "open3"
 require "yaml"
 require "fileutils"
@@ -19,9 +19,9 @@ def convert(src, format, dir, infilter: nil)
 end
 
 failed = false
-YAML.safe_load_file("samples/manifest.yml", symbolize_names: true).each do |m|
+YAML.safe_load_file("data/samples/manifest.yml", symbolize_names: true).each do |m|
   Dir.mktmpdir("build-sample") do |dir|
-    built = convert("samples/src/#{m[:src]}", "docx", dir, infilter: "HTML (StarWriter)")
+    built = convert("data/samples/src/#{m[:src]}", "docx", dir, infilter: "HTML (StarWriter)")
     built = convert(built, "pdf", dir) if File.extname(m[:out]) == ".pdf"
     FileUtils.mkdir_p(File.dirname(m[:out]))
     FileUtils.mv(built, m[:out])

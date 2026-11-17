@@ -6,7 +6,7 @@ require "yaml"
 store = Rag::Store.new(ENV.fetch("DATABASE_URL"))
 store.migrate!
 embedder = Rag::Embedder.new
-qs = YAML.load_file(File.expand_path("../samples/questions.yml", __dir__)).select { |q| q["answerable"] && !q["after_upload"] }
+qs = YAML.load_file(File.expand_path("questions.yml", __dir__)).select { |q| q["answerable"] && !q["after_upload"] }
 abort "Không có câu hỏi nào để kiểm tra." if qs.empty?
 hits_found = 0
 qs.each do |q|

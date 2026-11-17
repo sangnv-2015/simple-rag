@@ -18,7 +18,7 @@ class ConfigTest < Minitest::Test
     c = Rag::Config.from_env("DEEPSEEK_API_KEY" => "k", "DEEPSEEK_API_BASE" => "http://x", "DATABASE_URL" => "postgres://d")
     assert_equal "deepseek-flash", c.model
     assert_equal "postgres://d", c.database_url
-    assert c.documents_dir.end_with?("documents")
+    assert c.documents_dir.end_with?("data/raw")
   end
 
   def test_inspect_does_not_leak_key
@@ -36,7 +36,7 @@ class ConfigTest < Minitest::Test
     assert_equal ["m1", "/d"], [c.model, c.documents_dir]
     c = Rag::Config.from_env(base.merge("DEEPSEEK_MODEL" => " ", "DOCUMENTS_DIR" => " "))
     assert_equal "deepseek-flash", c.model
-    assert c.documents_dir.end_with?("documents")
+    assert c.documents_dir.end_with?("data/raw")
   end
 
   def test_no_stray_required_constant
