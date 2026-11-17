@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hỏi đáp tài liệu</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 46rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; color: #222; }
+  nav { display: flex; justify-content: space-between; align-items: baseline; }
+  input[type=text] { width: 100%; box-sizing: border-box; padding: .5rem; font-size: 1rem; margin: .25rem 0 .5rem; }
+  button { padding: .5rem 1.25rem; font-size: 1rem; }
+  .note { background: #fff6dd; padding: .5rem .75rem; border-radius: 4px; }
+  #answer { white-space: pre-wrap; }
+  #sources { padding-left: 0; list-style: none; }
+  #sources li { margin: .5rem 0; }
+  .quote { color: #555; display: block; }
+</style>
+</head>
+<body>
+<nav><h1>Hỏi đáp tài liệu</h1><a href="/documents">Tài liệu</a></nav>
+<%= yield %>
+</body>
+</html>

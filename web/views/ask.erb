@@ -1,0 +1,57 @@
+<% if @empty %>
+<p class="note">Chưa có tài liệu nào. Chạy lệnh nạp (docker compose run --rm app bin/ingest) hoặc tải file lên ở trang Tài liệu.</p>
+<% end %>
+<form id="form">
+  <label for="q">Câu hỏi</label>
+  <input type="text" id="q" name="q" autocomplete="off" required autofocus>
+  <button type="submit" id="go">Hỏi</button>
+</form>
+<div id="answer" aria-live="polite"></div>
+<ul id="sources"></ul>
+<script>
+(function () {
+  var form = document.getElementById("form"), input = document.getElementById("q"),
+      go = document.getElementById("go"), answer = document.getElementById("answer"),
+      list = document.getElementById("sources"), es = null;
+  var NOT_FOUND = "Không tìm thấy thông tin này trong tài liệu.";
+  var show = function (t) { answer.textContent = t.replace(/\[S(\d+)\]/g, "[$1]"); };
+
+  function finish() { if (es) es.close(); es = null; go.disabled = false; }
+
+  function addSource(s) {
+    var li = document.createElement("li"), a = document.createElement("a");
+    a.href = "/documents/" + encodeURIComponent(s.filename) + "?page=" + encodeURIComponent(s.page);
+    a.textContent = "[" + s.n + "] " + s.filename + " · trang " + s.page + (s.docx ? " (bản PDF)" : "");
+    li.appendChild(a);
+    var q = document.createElement("span");
+    q.className = "quote";
+    q.textContent = s.quote ? "“" + s.quote + "”" : "không xác minh được đoạn trích";
+    li.appendChild(q);
+    list.appendChild(li);
+  }
+
+  form.addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var question = input.value.trim();
+    if (!question || go.disabled) return;
+    if (es) es.close();
+    go.disabled = true;
+    answer.textContent = "";
+    list.textContent = "";
+    var acc = "";
+    es = new EventSource("/ask?q=" + encodeURIComponent(question));
+    es.addEventListener("delta", function (e) { acc += JSON.parse(e.data).text; show(acc); });
+    es.addEventListener("done", function (e) {
+      var d = JSON.parse(e.data);
+      if (d.found) { show(d.text); d.sources.forEach(addSource); } else { answer.textContent = NOT_FOUND; }
+      finish();
+    });
+    // Server "error" events carry data; a dropped connection fires the same name without data.
+    es.addEventListener("error", function (e) {
+      answer.textContent = e.data ? JSON.parse(e.data).message : "Không thể trả lời lúc này. Vui lòng thử lại sau.";
+      list.textContent = "";
+      finish();
+    });
+  });
+})();
+</script>
