@@ -24,5 +24,5 @@ all.each do |q|
   puts "#{rank ? rank + 1 : "MISS"} score=#{score} #{q["question"]}"
   puts "    top-1: #{hits[0].filename} trang #{hits[0].page}" if !rank && hits[0]
 end
-puts "answerable top-1 min=#{format("%.3f", top1[true].min)} | unanswerable top-1 max=#{format("%.3f", top1[false].max || 0)} | in top 6: #{hits_found}/#{qs.size}"
+puts "answerable top-1 min=#{format("%.3f", top1[true].min || 0)} | unanswerable top-1 max=#{format("%.3f", top1[false].max || 0)} | in top 6: #{hits_found}/#{qs.size}"
 exit(hits_found.to_f / qs.size < 0.8 ? 1 : 0)

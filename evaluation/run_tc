@@ -3,6 +3,7 @@
 require "net/http"
 require "json"
 require "yaml"
+require_relative "../src/text"
 
 BASE = URI(ENV.fetch("BASE", "http://app:4567"))
 QS = YAML.load_file(File.expand_path("questions.yml", __dir__))
@@ -17,7 +18,7 @@ def call(path, tenant, body = nil)
   JSON.parse(res.body)
 end
 
-def squash(s) = s.to_s.gsub(/\s+/, " ").strip.downcase
+def squash(s) = Rag::Text.comparable(s.to_s).downcase
 def tagged(tc, nth = 0) = QS.select { |q| q["tc"]&.include?(tc) }[nth] || raise("no question tagged #{tc}")
 def search(q, tenant, ids = []) = call("/api/search", tenant, question: q, document_ids: ids, top_k: 6)["chunks"]
 def ask(q, tenant, ids = []) = call("/api/ask", tenant, question: q, document_ids: ids)
@@ -31,7 +32,9 @@ CHECKS = {
     right = search(q["question"], "nus").select { |c| right?(c, q) }
     a = ask(q["question"], "nus")
     cited = a["citations"].any? { |c| right.any? { |r| r["chunk_id"] == c["chunk_id"] } }
-    [!right.empty? && a["status"] == "answered" && cited, "right chunk in top 6: #{!right.empty?}, status=#{a["status"]}, cites it: #{cited}"]
+    figure = q["contains"][/\d[\d.,]*/] # the expected figure, e.g. "5" from "tối đa 5 ngày"
+    has_figure = a["answer"].to_s.include?(figure)
+    [!right.empty? && a["status"] == "answered" && cited && has_figure, "right chunk in top 6: #{!right.empty?}, status=#{a["status"]}, cites it: #{cited}, answer has #{figure}: #{has_figure}"]
   },
   "TC2" => lambda {
     q = tagged("TC2")
@@ -45,9 +48,10 @@ CHECKS = {
   },
   "TC4" => lambda {
     q = tagged("TC4")
-    expired = docs("nus").reject { |d| d["status"] == "done" && call("/api/documents?current=true", "nus")["documents"].any? { |c| c["id"] == d["id"] } }.map { |d| d["id"] }
-    ids = (search(q["question"], "nus") + ask(q["question"], "nus")["chunks"]).map { |c| c["document_id"] }
-    [!expired.empty? && (ids & expired).empty?, "expired document ids=#{expired}, ids seen=#{ids.uniq}"]
+    expired = docs("nus").select { |d| d["status"] == "expired" }.map { |d| d["id"] }
+    chunks = search(q["question"], "nus") + ask(q["question"], "nus")["chunks"]
+    ids = chunks.map { |c| c["document_id"] }
+    [!expired.empty? && (ids & expired).empty? && chunks.any? { |c| right?(c, q) }, "expired document ids=#{expired}, ids seen=#{ids.uniq}, right current chunk present: #{chunks.any? { |c| right?(c, q) }}"]
   },
   "TC5" => lambda {
     nq, aq = tagged("TC5", 0), tagged("TC5", 1)
