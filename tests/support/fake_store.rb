@@ -27,6 +27,13 @@ class FakeStore
     id
   end
 
+  def update_validity(id, valid_from:, valid_to:)
+    e = @docs[id] or return
+    e[:doc].valid_from = valid_from
+    e[:doc].valid_to = valid_to
+    nil
+  end
+
   def finish_document(id, pages:, chunks:)
     e = @docs[id] or raise Rag::Error, "Tài liệu đã bị xóa trong khi xử lý."
     e[:pages] = pages.map { |p| p.dup.tap { |q| q.raw_text = nul(q.raw_text); q.markdown = nul(q.markdown) } }

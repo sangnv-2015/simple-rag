@@ -176,9 +176,42 @@ class AskRouteTest < Minitest::Test
     app = app_with
     app.set :host_authorization, permitted_hosts: ["localhost", "tunnel.example"]
     assert_equal 200, get(app, "/", host: "tunnel.example").status
-    assert_equal 200, post_ask(app, { "q" => "x" }, host: "tunnel.example", origin: "https://tunnel.example").status
+    assert_equal 200, post_ask(app, { "q" => "x" }, host: "tunnel.example", origin: "http://tunnel.example").status
     assert_equal 403, get(app, "/", host: "evil.example").status
     assert_equal 403, get(app, "/", host: "tunnel.example", origin: "https://evil.example").status
+  end
+
+  def test_public_host_is_read_and_chat_only
+    ask = FakeAsk.new { Rag::Answer.new("", false, []) }
+    app = app_with(ask: ask)
+    app.set :host_authorization, permitted_hosts: ["localhost", "tunnel.example"]
+    app.set :public_host_list, ["tunnel.example"]
+    mock = Rack::MockRequest.new(app)
+    h = { "HTTP_HOST" => "tunnel.example" }
+    [["POST", "/api/documents"], ["DELETE", "/api/documents/1"], ["POST", "/api/ask"], ["POST", "/api/search"],
+     ["POST", "/documents"], ["POST", "/documents/1/delete"], ["POST", "/%64ocuments/1/delete"]].each do |m, path|
+      assert_equal 403, mock.request(m, path, h).status, "#{m} #{path}"
+    end
+    api = mock.post("/api/ask", h)
+    assert_equal({ "error" => "write access is not available on the public host" }, JSON.parse(api.body))
+    assert_equal 200, get(app, "/", host: "tunnel.example").status
+    assert_equal 200, post_ask(app, { "q" => "x" }, host: "tunnel.example").status
+    refute_equal 403, mock.post("/documents/1/delete", "HTTP_HOST" => "localhost:4567").status # local host keeps full access
+  end
+
+  def test_ask_ids_above_max_id_are_400
+    ask = FakeAsk.new { Rag::Answer.new("", false, []) }
+    r = post_ask(app_with(ask: ask), { "q" => "x", "document_ids" => [WebApi::MAX_ID + 1] })
+    assert_equal [400, "Yêu cầu không hợp lệ."], [r.status, r.body]
+    assert_empty ask.calls
+    assert_equal 200, post_ask(app_with(ask: ask), { "q" => "x", "document_ids" => [WebApi::MAX_ID] }).status
+  end
+
+  def test_origin_with_other_port_or_scheme_is_forbidden
+    app = app_with
+    assert_equal 403, post_ask(app, { "q" => "x" }, origin: "http://localhost:9999").status
+    assert_equal 403, post_ask(app, { "q" => "x" }, origin: "https://localhost:4567").status
+    assert_equal 200, post_ask(app, { "q" => "x" }, origin: "http://localhost:4567").status
   end
 
   def test_foreign_origin_is_forbidden_on_every_method_and_ask_not_called

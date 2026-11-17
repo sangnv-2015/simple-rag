@@ -208,6 +208,16 @@ module StoreContract
     assert_in_delta 1.0, hit.score, 1e-6
   end
 
+  def test_update_validity_changes_dates_only
+    s = store_for_helpers
+    v1 = done("a1.pdf", title: "T", version: 1, valid_from: Date.new(2026, 1, 1), valid_to: Date.new(2026, 12, 31))
+    done("a2.pdf", title: "T", version: 2, valid_from: Date.new(2026, 6, 1), valid_to: Date.new(2027, 12, 31))
+    s.update_validity(v1, valid_from: Date.new(2025, 1, 1), valid_to: Date.new(2025, 5, 5))
+    d = s.document(v1)
+    assert_equal ["expired", Date.new(2025, 1, 1), Date.new(2025, 5, 5)], [d.status, d.valid_from, d.valid_to]
+    assert_equal 1, s.chunks(v1).size
+  end
+
   def test_finish_expires_lower_versions
     s = store_for_helpers
     v1 = done("a1.pdf", title: "T", version: 1, valid_from: Date.new(2026, 1, 1), valid_to: Date.new(2026, 12, 31))

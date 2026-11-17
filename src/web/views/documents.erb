@@ -47,14 +47,16 @@
 <script>
 (function () {
   var sel = document.getElementById("tenant"), def = sel.dataset.default;
-  var stored = localStorage.getItem("rag.tenant");
+  var stored = null;
+  try { stored = localStorage.getItem("rag.tenant"); } catch (e) { /* storage unusable */ }
   var hasParam = /[?&]tenant=/.test(location.search);
   if (!hasParam && stored && stored !== def && Array.prototype.some.call(sel.options, function (o) { return o.value === stored; })) {
     location.replace("/documents?tenant=" + encodeURIComponent(stored));
     return;
   }
-  if (hasParam) localStorage.setItem("rag.tenant", sel.value);
-  sel.addEventListener("change", function () { localStorage.setItem("rag.tenant", sel.value); sel.form.submit(); });
+  function remember() { try { localStorage.setItem("rag.tenant", sel.value); } catch (e) { /* storage unusable */ } }
+  if (hasParam) remember();
+  sel.addEventListener("change", function () { remember(); sel.form.submit(); });
   var file = document.getElementById("file"), title = document.getElementById("title");
   file.addEventListener("change", function () {
     if (file.files[0] && !title.value) title.value = file.files[0].name.replace(/\.[^.]*$/, "");

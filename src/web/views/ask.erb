@@ -283,7 +283,7 @@
 
   function sendQuestion(q) {
     if (ctrl) ctrl.abort(); // never leave an orphan pending turn
-    var ids = checkedIds(), idx = current.turns.length, conv = current, mine = ctrl = new AbortController(), t = buildTurn(q), acc = "", done = null, failed = false;
+    var boxes = scope.querySelectorAll("input[type=checkbox]"), ids = checkedIds(), idx = current.turns.length, conv = current, mine = ctrl = new AbortController(), t = buildTurn(q), acc = "", done = null, failed = false;
     var history = conv.turns.slice(-3).map(function (x) { return { q: x.q.slice(0, 1000), a: (x.found ? x.a : NOT_FOUND).slice(0, 2000) }; });
     input.disabled = go.disabled = true;
     t.ans.setAttribute("aria-live", "polite");
@@ -296,7 +296,7 @@
       else if (name === "error") failed = true;
     }
 
-    fetch("/ask", { method: "POST", headers: { "content-type": "application/json", "X-Tenant-Id": conv.tenant }, body: JSON.stringify({ q: q, history: history, document_ids: ids }), signal: mine.signal })
+    fetch("/ask", { method: "POST", headers: { "content-type": "application/json", "X-Tenant-Id": conv.tenant }, body: JSON.stringify({ q: q, history: history, document_ids: ids.length === boxes.length ? [] : ids }), signal: mine.signal })
       .then(function (res) {
         if (!res.ok) throw new Error("HTTP " + res.status);
         var reader = res.body.getReader(), dec = new TextDecoder(), buf = "";
@@ -349,7 +349,7 @@
     input.value = "";
     sendQuestion(q);
   });
-  newChat.addEventListener("click", startNewChat);
+  newChat.addEventListener("click", function () { startNewChat(); loadScope(); }); // reload: documents may have changed
   if (window.matchMedia && matchMedia("(max-width: 48rem)").matches) document.getElementById("sidebar").open = false;
   scope.addEventListener("change", function () { scopeMsg.hidden = true; });
   tenantSel.addEventListener("change", function () {

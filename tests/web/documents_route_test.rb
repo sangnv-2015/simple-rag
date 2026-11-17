@@ -290,7 +290,7 @@ class DocumentsRouteTest < Minitest::Test
     assert_equal 303, upload.status
     assert_equal 303, upload(name: "b.pdf", env: { "HTTP_ORIGIN" => "http://localhost:4567" }).status
     assert_equal 303, upload(name: "c.pdf", env: { "HTTP_ORIGIN" => "http://[::1]:4567" }).status
-    assert_equal 303, upload(name: "d.pdf", env: { "HTTP_ORIGIN" => "http://127.0.0.1" }).status
+    assert_equal 303, upload(name: "d.pdf", env: { "HTTP_ORIGIN" => "http://127.0.0.1:4567" }).status
   end
 
   def test_viewer_shows_two_columns_flags_and_unreadable_page

@@ -31,6 +31,7 @@ class Web < Sinatra::Base
   # Tolerates a pasted URL ("https://x.ngrok-free.app/"): Host headers carry the bare name only.
   def self.public_hosts(raw) = raw.to_s.split(",").map { |h| h.strip.sub(%r{\A\w+://}, "").chomp("/") }.reject(&:empty?)
   PUBLIC_HOSTS = public_hosts(ENV["PUBLIC_HOST"]).freeze
+  set :public_host_list, PUBLIC_HOSTS
   set :host_authorization, permitted_hosts: ["localhost", "127.0.0.1", "[::1]", *PUBLIC_HOSTS]
   use Rack::TempfileReaper
   set :show_exceptions, false
@@ -63,17 +64,37 @@ class Web < Sinatra::Base
     reject = lambda do |status, vi, en|
       api ? [status, { "content-type" => "application/json" }, [JSON.generate(error: en)]] : [status, { "content-type" => "text/plain; charset=utf-8" }, [vi]]
     end
-    return reject.call(403, "Yêu cầu không hợp lệ.", "cross-origin request refused") if origin && !local_origin?(origin)
+    return reject.call(403, "Yêu cầu không hợp lệ.", "cross-origin request refused") if origin && !local_origin?(origin, env)
+    # Public demo = read + chat only: no auth exists, so a tunnel Host must not upload, delete or call the JSON API (POST /ask stays).
+    if public_request?(env) && write_route?(env)
+      return reject.call(403, "Không được phép qua địa chỉ công khai.", "write access is not available on the public host")
+    end
     if env["CONTENT_LENGTH"].to_i > settings.max_upload_bytes + MULTIPART_OVERHEAD
       return reject.call(413, TOO_LARGE, "request body too large")
     end
     super
   end
 
-  def local_origin?(origin)
-    settings.host_authorization[:permitted_hosts].include?(URI.parse(origin).host)
+  # Host must be permitted (loopback aliases allowed); scheme and port must be this request's own, so another local app is refused.
+  def local_origin?(origin, env)
+    u = URI.parse(origin)
+    return false unless settings.host_authorization[:permitted_hosts].include?(u.host)
+    own = Rack::Request.new(env)
+    [u.scheme, u.port] == [own.scheme, own.port]
   rescue URI::InvalidURIError
     false
+  end
+
+  def public_request?(env)
+    host = env["HTTP_HOST"].to_s.sub(/:\d+\z/, "")
+    settings.public_host_list.include?(host)
+  end
+
+  # Decoded first: Mustermann also matches percent-encoded paths.
+  def write_route?(env)
+    return false if %w[GET HEAD].include?(env["REQUEST_METHOD"])
+    path = Rack::Utils.unescape_path(env["PATH_INFO"].to_s)
+    path.start_with?("/api") || path == "/documents" || path.match?(%r{\A/documents/[^/]+/delete\z})
   end
 
   get "/" do
@@ -226,7 +247,7 @@ class Web < Sinatra::Base
     halt 400, BAD_REQUEST unless history.is_a?(Array) &&
                                  history.all? { |t| t.is_a?(Hash) && [t["q"], t["a"]].all? { |v| v.is_a?(String) && v.valid_encoding? } }
     ids = data.fetch("document_ids", [])
-    halt 400, BAD_REQUEST unless ids.is_a?(Array) && ids.size <= MAX_DOCUMENT_IDS && ids.all? { |i| i.is_a?(Integer) && i.positive? }
+    halt 400, BAD_REQUEST unless ids.is_a?(Array) && ids.size <= MAX_DOCUMENT_IDS && ids.all? { |i| i.is_a?(Integer) && i.between?(1, WebApi::MAX_ID) }
     [q, history.last(HISTORY_TURNS).map { |t| { q: t["q"][0, HISTORY_Q_MAX], a: t["a"][0, HISTORY_A_MAX] } }, ids]
   end
 

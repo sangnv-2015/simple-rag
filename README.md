@@ -165,7 +165,7 @@ OK: acme-quy-dinh-lam-viec-tu-xa.docx, quy-che-nghi-phep-v1.pdf, quy-che-nghi-ph
 ```
 
 - File nào nằm trong `data/raw/` mà không có metadata trong manifest sẽ hiện thành `Bỏ qua (thiếu metadata): <tên file>` và không được nạp.
-- Chạy lại thì các file không đổi được bỏ qua và không tốn lệnh gọi trả phí (`Bỏ qua (không đổi): ...`).
+- Chạy lại thì các file không đổi được bỏ qua và không tốn lệnh gọi trả phí (`Bỏ qua (không đổi): ...`). Nếu file không đổi nhưng ngày hiệu lực khác, chỉ ngày hiệu lực được cập nhật, không nạp lại; bản `expired` vẫn là `expired`.
 - Sau khi nạp, `quy-che-nghi-phep-v1.pdf` (phiên bản 1, hiệu lực 2024-2025) có trạng thái `expired`, còn `quy-che-nghi-phep.pdf` (phiên bản 2) là `done`; `acme-quy-dinh-lam-viec-tu-xa.docx` thuộc tenant `acme`.
 
 Sau `up -d`, chờ vài giây cho đến khi `docker compose logs app` hiện dòng `* Listening on http://0.0.0.0:4567`, rồi mở http://localhost:4567.
@@ -395,7 +395,7 @@ Ba thành phần cần có các phương thức sau (tên đúng như trong code
 
 - `llm`: `chat(messages, &on_delta)`. `messages` là mảng `{role:, content:}`. Có block thì stream, gọi block với từng đoạn chữ rồi trả về toàn bộ chữ; không có block thì trả chuỗi. Lỗi nên là lớp con của `Rag::Error`: message của nó được `scripts/ask` in ra và được ghi làm lý do trạng thái khi nạp. Trang hỏi đáp trên web luôn chỉ hiện thông báo cố định `Không thể trả lời lúc này. Vui lòng thử lại sau.`
 - `embedder`: `embed_passages(texts)` trả mảng vector (cho đoạn tài liệu), `embed_query(text)` trả một vector (cho câu hỏi). Kích thước vector là `Rag::EMBED_DIM` (384).
-- `store`: `find_document(tenant_id:, title:, version:)`, `start_document(tenant_id:, title:, version:, valid_from:, valid_to:, filename:, path:, sha256:)` (trả id), `finish_document(id, pages:, chunks:)`, `fail_document(id, message)`, `search(embedding, k, tenant_id:, document_ids:, on:)` (trả mảng `Rag::Hit`; `on` là ngày dùng để kiểm tra hiệu lực). Web demo còn dùng `documents(tenant_id:)`, `document(id, tenant_id:)` và `pages(document_id)`. Hợp đồng mà lõi dựa vào: `search` chỉ trả đoạn của tài liệu có trạng thái `"done"`, đúng `tenant_id`, đang còn hiệu lực vào ngày `on`, và thuộc `document_ids` nếu danh sách không rỗng (rỗng là mọi tài liệu của tenant); các trạng thái là `"processing"`, `"done"`, `"expired"`, `"error"`; nạp chỉ bỏ qua khi sha256 trùng VÀ trạng thái là `"done"` hoặc `"expired"`; `start_document` thay thế bản ghi cũ cùng `(tenant_id, title, version)`, cùng với trang và đoạn của nó; `finish_document` ghi trang, đoạn và trạng thái `"done"` trong một giao dịch nguyên tử, đồng thời chuyển các phiên bản thấp hơn của cùng `(tenant_id, title)` sang `"expired"`. Kiểu dữ liệu: `Rag::Page`, `Rag::Chunk`, `Rag::Doc`, `Rag::Hit` trong `src/rag.rb`.
+- `store`: `find_document(tenant_id:, title:, version:)`, `start_document(tenant_id:, title:, version:, valid_from:, valid_to:, filename:, path:, sha256:)` (trả id), `finish_document(id, pages:, chunks:)`, `update_validity(id, valid_from:, valid_to:)` (chỉ đổi ngày hiệu lực, giữ nguyên trạng thái), `fail_document(id, message)`, `search(embedding, k, tenant_id:, document_ids:, on:)` (trả mảng `Rag::Hit`; `on` là ngày dùng để kiểm tra hiệu lực). Web demo còn dùng `documents(tenant_id:)`, `document(id, tenant_id:)` và `pages(document_id)`. Hợp đồng mà lõi dựa vào: `search` chỉ trả đoạn của tài liệu có trạng thái `"done"`, đúng `tenant_id`, đang còn hiệu lực vào ngày `on`, và thuộc `document_ids` nếu danh sách không rỗng (rỗng là mọi tài liệu của tenant); các trạng thái là `"processing"`, `"done"`, `"expired"`, `"error"`; nạp chỉ bỏ qua khi sha256 trùng VÀ trạng thái là `"done"` hoặc `"expired"`; `start_document` thay thế bản ghi cũ cùng `(tenant_id, title, version)`, cùng với trang và đoạn của nó; `finish_document` ghi trang, đoạn và trạng thái `"done"` trong một giao dịch nguyên tử, đồng thời chuyển các phiên bản thấp hơn của cùng `(tenant_id, title)` sang `"expired"`. Kiểu dữ liệu: `Rag::Page`, `Rag::Chunk`, `Rag::Doc`, `Rag::Hit` trong `src/rag.rb`.
 
 Thay thế:
 
@@ -415,4 +415,4 @@ Trước khi đưa vào môi trường thật:
 - Từ chối endpoint mô hình không phải https.
 - Giữ tự động escape HTML trong view của hệ thống (view demo phải tự gọi `h(...)`).
 
-Demo bỏ qua: đăng nhập và phân quyền, mở rộng tải, và OCR.
+Khi đặt `PUBLIC_HOST` (ví dụ tên miền ngrok), địa chỉ công khai đó chỉ đọc và chat (`POST /ask`); tải lên, xóa và `/api` ghi bị từ chối 403 vì app không có đăng nhập. Demo bỏ qua: đăng nhập và phân quyền, mở rộng tải, và OCR.

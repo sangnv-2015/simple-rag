@@ -41,7 +41,11 @@ module Rag
       raise Error, "Chỉ nhận file .pdf và .docx." unless EXTENSIONS.include?(File.extname(name).downcase)
       sha = Digest::SHA256.file(path).hexdigest
       existing = @store.find_document(tenant_id: meta.tenant_id, title: meta.title, version: meta.version)
-      return Prepared.new(existing.id, true, name) if existing && existing.sha256 == sha && %w[done expired].include?(existing.status)
+      if existing && existing.sha256 == sha && %w[done expired].include?(existing.status)
+        # Same file, maybe new dates: keep the data, store the dates the caller gave.
+        @store.update_validity(existing.id, valid_from: meta.valid_from, valid_to: meta.valid_to) unless [existing.valid_from, existing.valid_to] == [meta.valid_from, meta.valid_to]
+        return Prepared.new(existing.id, true, name)
+      end
       id = @store.start_document(**meta.to_h, filename: name, path: path, sha256: sha)
       Prepared.new(id, false, name)
     end

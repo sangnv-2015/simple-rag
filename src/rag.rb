@@ -58,6 +58,7 @@ module Rag
   raise Error, "config/retriever.yaml: semantic_breakpoint_percentile must be between 1 and 99" unless (1..99).cover?(SEMANTIC_PERCENTILE)
   SEMANTIC_FLOOR = RETRIEVER_SETTINGS.fetch("semantic_floor").to_f
   SEMANTIC_MIN_UNITS = RETRIEVER_SETTINGS.fetch("semantic_min_units")
+  raise Error, "config/retriever.yaml: semantic_min_units must be at least 2" unless SEMANTIC_MIN_UNITS >= 2
 
   Page = Struct.new(:number, :raw_text, :markdown, :readable, :fallback, keyword_init: true)
   Chunk = Struct.new(:page, :position, :text, :embedding, :id, keyword_init: true)

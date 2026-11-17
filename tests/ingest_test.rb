@@ -239,6 +239,19 @@ class IngestTest < Minitest::Test
     assert_equal first.id, again.id
   end
 
+  def test_prepare_same_sha_new_dates_skips_but_updates_dates
+    path = write("a.pdf")
+    ing = ingest("a.pdf" => [page(1)])
+    first = ing.prepare(path, meta)
+    ing.run(first.id, path)
+    llm_n, emb_n = @llm.calls.size, @embedder.inputs.size
+    again = ing.prepare(path, meta(valid_from: Date.new(2026, 3, 1), valid_to: Date.new(2027, 3, 1)))
+    assert again.skipped
+    assert_equal [llm_n, emb_n], [@llm.calls.size, @embedder.inputs.size]
+    d = @store.document(first.id)
+    assert_equal ["done", Date.new(2026, 3, 1), Date.new(2027, 3, 1)], [d.status, d.valid_from, d.valid_to]
+  end
+
   def test_prepare_same_triple_new_sha_replaces
     path = write("a.pdf", "v1")
     ing = ingest("a.pdf" => [page(1)])

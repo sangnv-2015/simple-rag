@@ -66,6 +66,12 @@ module Rag
       end
     end
 
+    # Dates only: status stays (an expired version stays expired).
+    def update_validity(id, valid_from:, valid_to:)
+      exec("UPDATE documents SET valid_from = $2::date, valid_to = $3::date WHERE id = $1", [id, valid_from.iso8601, valid_to.iso8601])
+      nil
+    end
+
     def finish_document(id, pages:, chunks:)
       with_conn do
         @conn.transaction do

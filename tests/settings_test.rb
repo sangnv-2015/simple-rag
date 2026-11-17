@@ -15,6 +15,7 @@ class SettingsTest < Minitest::Test
     assert_equal "nus", Rag::DEFAULT_TENANT
     assert_equal "semantic", Rag::CHUNKING
     assert_equal 25, Rag::SEMANTIC_PERCENTILE
+    assert_operator Rag::SEMANTIC_MIN_UNITS, :>=, 2 # the load-time guard in rag.rb cannot be re-run on a bad file
   end
 
   def test_string_list_type
