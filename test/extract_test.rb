@@ -4,6 +4,10 @@ require "tmpdir"
 class ExtractTest < Minitest::Test
   LINES = Array.new(150) { |i| "Quy định nghỉ phép năm số #{i} của công ty" }.join("\n")
 
+  # Failed conversions log to $stderr for the operator: keep test output clean.
+  def setup = ($real_stderr, $stderr = $stderr, StringIO.new)
+  def teardown = ($stderr = $real_stderr)
+
   def test_split_pages_numbers_and_drops_trailing_empty
     pages = Rag::Extract.split_pages("Quy định nghỉ phép năm của công ty\fTrang hai có chữ đủ dài để đọc được\f")
     assert_equal [1, 2], pages.map(&:number)
@@ -42,6 +46,18 @@ class ExtractTest < Minitest::Test
       path = File.join(d, "x.pdf")
       File.binwrite(path, Random.bytes(500))
       assert_raises(Rag::Extract::Error) { Rag::Extract.pages(path) }
+    end
+  end
+
+  def test_failed_command_logs_to_stderr_but_user_message_has_no_details
+    Dir.mktmpdir do |d|
+      path = File.join(d, "x.pdf")
+      File.binwrite(path, Random.bytes(500))
+      err = assert_raises(Rag::Extract::Error) { Rag::Extract.pages(path) }
+      logged = $stderr.string
+      assert_equal "Không đọc được tệp x.pdf.", err.message
+      assert_match(/pdftotext.*exit \d+/, logged)
+      assert_operator logged.size, :<=, 400
     end
   end
 

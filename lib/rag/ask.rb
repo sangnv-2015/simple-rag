@@ -7,6 +7,8 @@ module Rag
     NOT_FOUND = "NOT_FOUND"
     # The model may not put the marker on its own line, so detect the bare token.
     TOKEN = QUOTES_MARKER.strip
+    SOURCE_TAG = %r{\[/?S\d+\]}
+    TOKEN_RE = Regexp.union(TOKEN, NOT_FOUND)
 
     RULES = <<~TXT
       Bạn trả lời câu hỏi chỉ dựa trên các nguồn bên dưới.
@@ -26,14 +28,14 @@ module Rag
       def push(delta)
         @buf << delta
         return if sentinel?
-        limit = @buf.index(TOKEN) || @buf.size - held_back
-        # Whitespace right before the marker is held too: the parser strips it from the answer.
+        limit = @buf.index(TOKEN_RE) || @buf.size - held_back
+        # Whitespace right before a token is held too: the parser strips it from the answer.
         emit(@buf[0...limit].rstrip.size)
       end
 
       # Releases text held back as a possible marker that never completed.
       def finish
-        emit(@buf.size) unless sentinel? || @buf.include?(TOKEN)
+        emit(@buf.size) unless sentinel? || @buf.match?(TOKEN_RE)
       end
 
       private
@@ -50,7 +52,7 @@ module Rag
       end
 
       def held_back
-        (TOKEN.size - 1).downto(1).find { |n| @buf.end_with?(TOKEN[0, n]) } || 0
+        [TOKEN, NOT_FOUND].map { |t| (t.size - 1).downto(1).find { |n| @buf.end_with?(t[0, n]) } || 0 }.max
       end
     end
 
@@ -70,11 +72,19 @@ module Rag
 
     private
 
+    # Untrusted text must not be able to close its source block or fake another one.
+    def defang(text, tokens: false)
+      s = text.dup
+      pattern = tokens ? Regexp.union(SOURCE_TAG, TOKEN, NOT_FOUND) : SOURCE_TAG
+      nil while s.gsub!(pattern, "") # repeat: removing one token can join the pieces of another
+      s
+    end
+
     def prompt(question, hits)
       sources = hits.each_with_index.map do |h, i|
-        "[S#{i + 1}] file=#{h.filename} page=#{h.page}\n#{h.text}\n[/S#{i + 1}]"
+        "[S#{i + 1}] file=#{h.filename} page=#{h.page}\n#{defang(h.text, tokens: true)}\n[/S#{i + 1}]"
       end
-      "#{RULES}\n#{sources.join("\n\n")}\n\nCâu hỏi:\n#{question}\n"
+      "#{RULES}\n#{sources.join("\n\n")}\n\nCâu hỏi:\n#{defang(question)}\n"
     end
 
     def parse(reply, hits)

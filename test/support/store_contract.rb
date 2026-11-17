@@ -108,6 +108,8 @@ module StoreContract
       pages: [page(1)], chunks: [chunk(1, 0, "ok", v(0))])
     store.start_document(filename: "busy.pdf", sha256: "h")
     bad = store.start_document(filename: "bad.pdf", sha256: "h")
+    store.finish_document(bad, pages: [page(1)], chunks: [chunk(1, 0, "bad", v(0))])
+    assert_equal %w[bad.pdf ok.pdf], store.search(v(0), 10).map(&:filename).sort
     store.fail_document(bad, "boom")
     assert_equal ["ok.pdf"], store.search(v(0), 10).map(&:filename)
   end

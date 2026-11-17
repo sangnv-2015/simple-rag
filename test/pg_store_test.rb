@@ -6,8 +6,14 @@ class PgStoreTest < Minitest::Test
   def make_store
     store = Rag::Store.new(PgTestDb.url)
     store.migrate!
-    store.send(:exec, "TRUNCATE documents RESTART IDENTITY CASCADE")
+    PgTestDb.clear!(store)
     store
+  end
+
+  def test_clear_refuses_a_database_not_ending_in_test
+    real = Rag::Store.new(ENV.fetch("DATABASE_URL"))
+    err = assert_raises(RuntimeError) { PgTestDb.clear!(real) }
+    assert_includes err.message, "_test"
   end
 
   def test_recovers_after_connection_is_terminated

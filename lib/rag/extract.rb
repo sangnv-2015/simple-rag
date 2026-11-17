@@ -42,8 +42,10 @@ module Rag
 
     # Messages are shown to users: never include command output or paths.
     def self.run(*cmd, name: nil)
-      out, _err, st = Open3.capture3(*cmd)
+      out, err, st = Open3.capture3(*cmd)
       return out if st.success?
+      tool = cmd.find { |c| %w[pdftotext soffice].include?(c) }
+      warn "extract: #{tool} exit #{st.exitstatus.inspect}: #{err.scrub("").strip[0, 300]}" # operator log only
       name ||= File.basename(cmd.last)
       raise Error, "Quá thời gian xử lý tệp #{name}." if st.exitstatus == 124
       raise Error, "Không đọc được tệp #{name}."

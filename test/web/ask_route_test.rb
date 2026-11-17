@@ -27,8 +27,10 @@ class AskRouteTest < Minitest::Test
     Class.new(Web) { set :ask, ask; set :store, store }
   end
 
-  def get(app, path, host: "localhost:4567")
-    Rack::MockRequest.new(app).get(path, "HTTP_HOST" => host)
+  def get(app, path, host: "localhost:4567", origin: nil)
+    env = { "HTTP_HOST" => host }
+    env["HTTP_ORIGIN"] = origin if origin
+    Rack::MockRequest.new(app).get(path, env)
   end
 
   def events(body)
@@ -148,6 +150,17 @@ class AskRouteTest < Minitest::Test
     assert_equal 403, get(app, "/ask?q=x", host: "evil.example").status
     assert_equal 200, get(app, "/", host: "localhost:4567").status
     assert_equal 200, get(app, "/", host: "127.0.0.1:4567").status
+  end
+
+  def test_foreign_origin_is_forbidden_on_every_method_and_ask_not_called
+    ask = FakeAsk.new { Rag::Answer.new("", false, []) }
+    app = app_with(ask: ask)
+    assert_equal 403, get(app, "/ask?q=x", origin: "http://evil.example").status
+    assert_equal 403, get(app, "/", origin: "http://evil.example").status
+    assert_empty ask.calls
+    assert_equal 200, get(app, "/ask?q=x").status
+    assert_equal 200, get(app, "/", origin: "http://localhost:4567").status
+    assert_equal ["x"], ask.calls
   end
 
   private

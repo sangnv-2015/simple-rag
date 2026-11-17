@@ -33,7 +33,8 @@ class Web < Sinatra::Base
   # Path-independent on purpose: Mustermann also matches percent-encoded paths (/%64ocuments).
   def call!(env)
     origin = env["HTTP_ORIGIN"]
-    if !%w[GET HEAD].include?(env["REQUEST_METHOD"]) && origin && !local_origin?(origin)
+    # Every method: a cross-site GET /ask would spend paid model calls. Plain navigations send no Origin.
+    if origin && !local_origin?(origin)
       return [403, { "content-type" => "text/plain; charset=utf-8" }, ["Yêu cầu không hợp lệ."]]
     end
     if env["CONTENT_LENGTH"].to_i > settings.max_upload_bytes + MULTIPART_OVERHEAD

@@ -36,7 +36,7 @@
     if (!question || go.disabled) return;
     if (es) es.close();
     go.disabled = true;
-    answer.textContent = "";
+    answer.textContent = "Đang tìm câu trả lời…"; // replaced by the first delta, or by done/error
     list.textContent = "";
     var acc = "";
     es = new EventSource("/ask?q=" + encodeURIComponent(question));
