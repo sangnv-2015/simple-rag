@@ -1,5 +1,5 @@
 <p><a href="/documents">Tài liệu</a> · <a href="/">Hỏi đáp</a></p>
-<h2><%= h @name %></h2>
+<h2><%= h @doc.title %> <small>v<%= h @doc.version %> · <%= h @name %></small></h2>
 <% @pages.each do |pg| %>
 <% other = @current && pg.number != @current %>
 <% if other %><details><summary>Trang <%= h pg.number %></summary><% end %>

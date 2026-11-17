@@ -1,23 +1,63 @@
 <p><a href="/">Hỏi đáp</a></p>
 <h2>Tài liệu</h2>
 <% if @message %><p class="note" role="alert"><%= h @message %></p><% end %>
+<form method="get" action="/documents">
+  <label for="tenant">Tenant</label>
+  <select id="tenant" name="tenant" data-default="<%= h Rag::DEFAULT_TENANT %>">
+<% Rag::TENANTS.each do |t| %>
+    <option value="<%= h t %>"<%= " selected" if t == @tenant %>><%= h t %></option>
+<% end %>
+  </select>
+  <noscript><button type="submit">Chọn</button></noscript>
+</form>
 <% if @rows.empty? %>
 <p>Chưa có tài liệu nào.</p>
 <% else %>
 <table>
-  <tr><th>Tên file</th><th>Số trang</th><th>Số đoạn</th><th>Trạng thái</th></tr>
-<% @rows.each do |name, pages, chunks, label| %>
+  <tr><th>Tiêu đề</th><th>Phiên bản</th><th>Hiệu lực</th><th>Tên file</th><th>Số trang</th><th>Số đoạn</th><th>Trạng thái</th><th></th></tr>
+<% @rows.each do |d, label| %>
   <tr>
-    <td><a href="/documents/<%= h ERB::Util.url_encode(name) %>"><%= h name %></a></td>
-    <td><%= h pages %></td>
-    <td><%= h chunks %></td>
+    <td><a href="/documents/<%= h d.id %>"><%= h d.title %></a></td>
+    <td>v<%= h d.version %></td>
+    <td><%= h d.valid_from %> – <%= h d.valid_to %></td>
+    <td><%= h d.filename %></td>
+    <td><%= h d.page_count %></td>
+    <td><%= h d.chunk_count %></td>
     <td><%= h label %></td>
+    <td>
+      <form method="post" action="/documents/<%= h d.id %>/delete" onsubmit="return confirm('Xóa tài liệu này?')">
+        <input type="hidden" name="tenant_id" value="<%= h @tenant %>">
+        <button type="submit">Xóa</button>
+      </form>
+    </td>
   </tr>
 <% end %>
 </table>
 <% end %>
 <form method="post" action="/documents" enctype="multipart/form-data">
-  <label for="file">Chọn file (.pdf hoặc .docx)</label>
-  <input type="file" id="file" name="file" accept=".pdf,.docx" required>
+  <input type="hidden" name="tenant_id" value="<%= h @tenant %>">
+  <p><label for="file">Chọn file (.pdf hoặc .docx)</label>
+  <input type="file" id="file" name="file" accept=".pdf,.docx" required></p>
+  <p><label for="title">Tiêu đề</label> <input type="text" id="title" name="title" maxlength="200" required></p>
+  <p><label for="version">Phiên bản</label> <input type="number" id="version" name="version" min="1" value="1" required></p>
+  <p><label for="valid_from">Hiệu lực từ</label> <input type="date" id="valid_from" name="valid_from" value="<%= h Date.today.iso8601 %>" required></p>
+  <p><label for="valid_to">Hiệu lực đến</label> <input type="date" id="valid_to" name="valid_to" value="2999-12-31" required></p>
   <button type="submit">Tải lên</button>
 </form>
+<script>
+(function () {
+  var sel = document.getElementById("tenant"), def = sel.dataset.default;
+  var stored = localStorage.getItem("rag.tenant");
+  var hasParam = /[?&]tenant=/.test(location.search);
+  if (!hasParam && stored && stored !== def && Array.prototype.some.call(sel.options, function (o) { return o.value === stored; })) {
+    location.replace("/documents?tenant=" + encodeURIComponent(stored));
+    return;
+  }
+  if (hasParam) localStorage.setItem("rag.tenant", sel.value);
+  sel.addEventListener("change", function () { localStorage.setItem("rag.tenant", sel.value); sel.form.submit(); });
+  var file = document.getElementById("file"), title = document.getElementById("title");
+  file.addEventListener("change", function () {
+    if (file.files[0] && !title.value) title.value = file.files[0].name.replace(/\.[^.]*$/, "");
+  });
+})();
+</script>

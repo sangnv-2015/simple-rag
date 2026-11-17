@@ -6,26 +6,26 @@ class Worker
     @job = job
     @queue = Queue.new
     @lock = Mutex.new
-    @names = [] # queued and running, one entry per job
+    @keys = [] # queued and running, one entry per job
     @thread = Thread.new { loop { run(@queue.pop) } }
   end
 
-  def enqueue(path)
-    @lock.synchronize { @names << Rag::Text.nfc(File.basename(path)) }
-    @queue << path
+  def enqueue(key, *args)
+    @lock.synchronize { @keys << key }
+    @queue << [key, args]
   end
 
-  def pending = @lock.synchronize { @names.dup }
+  def pending = @lock.synchronize { @keys.dup }
 
   private
 
-  def run(path)
-    @job.call(path)
+  def run((key, args))
+    @job.call(key, *args)
   rescue Rag::Error => e
     warn "ingest failed: #{e.class}: #{e.message}"
   rescue StandardError => e
     warn "ingest failed: #{e.class}"
   ensure
-    @lock.synchronize { @names.delete_at(@names.index(Rag::Text.nfc(File.basename(path)))) }
+    @lock.synchronize { @keys.delete_at(@keys.index(key)) }
   end
 end

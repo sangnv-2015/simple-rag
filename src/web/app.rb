@@ -36,6 +36,7 @@ class Web < Sinatra::Base
   set :ask, nil
   set :store, nil
   set :worker, nil
+  set :ingest, nil
   set :documents_dir, nil
   set :max_upload_bytes, Rag::MAX_UPLOAD_BYTES
 
@@ -107,31 +108,35 @@ class Web < Sinatra::Base
   end
 
   get "/documents" do
-    list_page
+    list_page(nil, tenant_param(params[:tenant] || Rag::DEFAULT_TENANT))
   end
 
   post "/documents" do
+    tenant = Rag::TENANTS.include?(params[:tenant_id]) ? params[:tenant_id] : Rag::DEFAULT_TENANT
     file = params[:file]
-    halt 400, list_page("Chọn một file để tải lên.") unless file.is_a?(Hash) && file[:tempfile].respond_to?(:read)
+    halt 400, list_page("Chọn một file để tải lên.", tenant) unless file.is_a?(Hash) && file[:tempfile].respond_to?(:read)
     begin
-      path = Rag::Upload.save(filename: file[:filename], io: file[:tempfile],
-                              dir: settings.documents_dir, max_bytes: settings.max_upload_bytes)
-    rescue Rag::Upload::Rejected => e
-      halt 422, list_page(e.message)
+      accept_upload(params[:tenant_id], params, file)
+    rescue Rag::Meta::Invalid, Rag::Upload::Rejected => e
+      halt 422, list_page(e.message, tenant)
     rescue StandardError => e
       warn "upload failed: #{e.class}"
-      halt 500, list_page("Không tải được file lên. Vui lòng thử lại.")
+      halt 500, list_page("Không tải được file lên. Vui lòng thử lại.", tenant)
     end
-    settings.worker.enqueue(path)
-    redirect "/documents", 303
+    redirect "/documents?tenant=#{tenant}", 303
   end
 
-  get "/documents/*" do
-    name = params[:splat].first.to_s.dup.force_encoding(Encoding::UTF_8).scrub("_")
-    halt 404, "Không tìm thấy tài liệu." if name.include?("\0")
-    @name = Rag::Text.nfc(name)
-    doc = settings.store.documents.find { |d| d.filename == @name } # TEMP (Task 6): by filename until routes use ids
+  post "/documents/:id/delete" do
+    tenant = tenant_param(params[:tenant_id])
+    halt 404, "Không tìm thấy tài liệu." unless delete_document!(doc_id, tenant)
+    redirect "/documents?tenant=#{tenant}", 303
+  end
+
+  get "/documents/:id" do
+    doc = settings.store.document(doc_id)
     halt 404, "Không tìm thấy tài liệu." unless doc
+    @doc = doc
+    @name = doc.filename
     @pages = settings.store.pages(doc.id)
     n = Integer(params[:page].to_s, exception: false)
     @current = n if n && @pages.any? { |p| p.number == n }
@@ -140,7 +145,51 @@ class Web < Sinatra::Base
     erb :document
   end
 
+  # Shared with the API (Task 7). Raises Rag::Meta::Invalid / Rag::Upload::Rejected; nothing is kept on failure.
+  def accept_upload(tenant_id, fields, file)
+    meta = Rag::Meta.parse(tenant_id: tenant_id, title: fields[:title], version: fields[:version],
+                           valid_from: fields[:valid_from], valid_to: fields[:valid_to])
+    dir = File.join(settings.documents_dir, "uploads", meta.tenant_id)
+    FileUtils.mkdir_p(dir)
+    path = Rag::Upload.save(filename: file[:filename], io: file[:tempfile], dir: dir, max_bytes: settings.max_upload_bytes, unique: true)
+    begin
+      prep = settings.ingest.prepare(path, meta, filename: Rag::Upload.sanitize(file[:filename]))
+    rescue StandardError
+      Rag::Upload.remove(path, root: uploads_root)
+      raise
+    end
+    if prep.skipped
+      Rag::Upload.remove(path, root: uploads_root)
+    else
+      settings.worker.enqueue(prep.id, path)
+    end
+    prep
+  end
+
+  # Only files this app saved are removed, never data/raw samples or anything outside uploads/.
+  def delete_document!(id, tenant_id)
+    doc = settings.store.delete_document(id, tenant_id: tenant_id)
+    return false unless doc
+
+    Rag::Upload.remove(doc.path, root: uploads_root)
+    true
+  end
+
   private
+
+  def uploads_root = File.join(settings.documents_dir, "uploads")
+
+  def tenant_param(v)
+    halt 400, BAD_REQUEST unless v.is_a?(String) && Rag::TENANTS.include?(v)
+    v
+  end
+
+  # Document ids are small positive integers; anything else (names, huge numbers, bad bytes) is simply not found.
+  def doc_id
+    raw = params[:id].to_s.b
+    halt 404, "Không tìm thấy tài liệu." unless raw.match?(/\A\d{1,9}\z/n)
+    raw.to_i
+  end
 
   # -> [question, history] with history as at most 3 {q:, a:} Symbol-key hashes, or halts 400.
   def parse_ask(raw)
@@ -157,21 +206,20 @@ class Web < Sinatra::Base
     [q, history.last(HISTORY_TURNS).map { |t| { q: t["q"][0, HISTORY_Q_MAX], a: t["a"][0, HISTORY_A_MAX] } }]
   end
 
-  # Rows: stored documents plus names queued before ingest has created their record.
-  def list_page(message = nil)
+  def list_page(message, tenant)
     pending = settings.worker.pending
-    docs = settings.store.documents
+    @tenant = tenant
     @message = message
-    @rows = docs.map do |d|
+    @rows = settings.store.documents(tenant_id: tenant).map do |d|
+      waiting = pending.include?(d.id)
       label = case d.status
-              when "done" then pending.include?(d.filename) ? "đang chờ" : "xong"
-              when "error" then pending.include?(d.filename) ? "đang chờ" : "lỗi: #{d.error}"
-              else pending.include?(d.filename) ? "đang xử lý" : "lỗi: bị gián đoạn, hãy tải lại file hoặc chạy lại lệnh nạp"
+              when "done" then waiting ? "đang chờ" : "xong"
+              when "expired" then "hết hiệu lực"
+              when "error" then waiting ? "đang chờ" : "lỗi: #{d.error}"
+              else waiting ? "đang xử lý" : "lỗi: bị gián đoạn, hãy tải lại file hoặc chạy lại lệnh nạp"
               end
-      [d.filename, d.page_count, d.chunk_count, label]
+      [d, label]
     end
-    known = docs.map(&:filename)
-    (pending - known).uniq.each { |n| @rows << [n, nil, nil, "đang chờ"] }
     @refresh = message.nil? && !pending.empty?
     erb :documents
   end

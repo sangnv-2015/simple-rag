@@ -123,4 +123,32 @@ class UploadTest < Minitest::Test
     save(name.unicode_normalize(:nfd))
     assert_equal 1, Dir.children(@dir).size
   end
+
+  def test_unique_prefixes_uuid_and_keeps_sanitized_name
+    path = save("a b.pdf", unique: true)
+    assert_match(/\A[0-9a-f-]{36}-a b\.pdf\z/, File.basename(path))
+    assert_equal @dir_real = File.realpath(@dir), File.dirname(path)
+  end
+
+  def test_two_unique_saves_of_the_same_name_do_not_collide
+    a = save("a.pdf", "1", unique: true)
+    b = save("a.pdf", "2", unique: true)
+    refute_equal a, b
+    assert_equal %w[1 2], [File.read(a), File.read(b)]
+  end
+
+  def test_remove_deletes_inside_root_only
+    outside = File.join(@root, "outside.pdf")
+    File.write(outside, "x")
+    link = File.join(@dir, "link.pdf")
+    File.symlink(outside, link)
+    sub = File.join(@dir, "sub")
+    Dir.mkdir(sub)
+    inside = File.join(@dir, "in.pdf")
+    File.write(inside, "x")
+    [outside, link, sub, File.join(@dir, "missing.pdf")].each { |p| assert_equal false, Rag::Upload.remove(p, root: @dir), p }
+    assert File.exist?(outside) && File.symlink?(link) && File.directory?(sub)
+    assert_equal true, Rag::Upload.remove(inside, root: @dir)
+    refute File.exist?(inside)
+  end
 end

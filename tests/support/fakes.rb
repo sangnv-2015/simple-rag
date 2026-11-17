@@ -70,3 +70,12 @@ end
 
 # Test files call by_name(...) unqualified.
 Minitest::Test.include(TestMeta) if defined?(Minitest::Test)
+
+class FakeWorker
+  attr_reader :enqueued
+  attr_accessor :names
+
+  def initialize = (@enqueued, @names = [], [])
+  def enqueue(key, *args) = @enqueued << [key, *args]
+  def pending = @names
+end

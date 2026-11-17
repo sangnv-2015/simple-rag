@@ -10,6 +10,7 @@ end
 
 Web.set :ask, sys.ask
 Web.set :store, sys.store
-Web.set :worker, Worker.new { |path| sys.ingest.call(path) }
+Web.set :worker, Worker.new { |id, path| sys.ingest.run(id, path) }
+Web.set :ingest, sys.ingest
 Web.set :documents_dir, sys.config.documents_dir
 run Web

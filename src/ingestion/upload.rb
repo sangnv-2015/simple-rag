@@ -21,8 +21,9 @@ module Rag
       "#{stem}.#{ext}"
     end
 
-    def self.save(filename:, io:, dir:, max_bytes: Rag::MAX_UPLOAD_BYTES)
+    def self.save(filename:, io:, dir:, max_bytes: Rag::MAX_UPLOAD_BYTES, unique: false)
       name = sanitize(filename)
+      name = "#{SecureRandom.uuid}-#{name}" if unique
       root = File.realpath(dir)
       final = File.expand_path(name, root)
       raise Rejected, "Tên file không hợp lệ." unless final.start_with?(root + "/")
@@ -53,6 +54,17 @@ module Rag
         File.delete(tmp) if created && File.exist?(tmp)
       end
       final
+    end
+
+    # Deletes a regular file (not a symlink) whose real path is inside root; anything else is left alone.
+    def self.remove(path, root:)
+      return false if path.nil? || File.symlink?(path) || !File.file?(path)
+      return false unless File.realpath(path).start_with?(File.realpath(root) + "/")
+
+      File.delete(path)
+      true
+    rescue SystemCallError
+      false
     end
   end
 end
