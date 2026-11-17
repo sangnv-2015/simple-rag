@@ -90,7 +90,8 @@ class UploadTest < Minitest::Test
   end
 
   def test_vietnamese_name_with_spaces_kept_and_nfd_becomes_nfc
-    nfd = "Quy dịnh nghỉ phép (2026).pdf".unicode_normalize(:nfd)
+    nfd = "Quy định nghỉ phép (2026).pdf".unicode_normalize(:nfd)
+    refute_equal "Quy định nghỉ phép (2026).pdf", nfd
     assert_equal "Quy định nghỉ phép (2026).pdf", Rag::Upload.sanitize(nfd)
   end
 
