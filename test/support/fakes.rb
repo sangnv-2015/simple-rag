@@ -15,3 +15,45 @@ class FakeLLM
     out.join
   end
 end
+
+require "zlib"
+
+class FakeEmbedder
+  attr_reader :inputs
+
+  def initialize
+    @inputs = []
+  end
+
+  def embed_passages(texts)
+    @inputs << texts
+    texts.map { |t| vector(t) }
+  end
+
+  def embed_query(text) = vector(text)
+
+  private
+
+  def vector(text)
+    v = Array.new(Rag::EMBED_DIM, 0.0)
+    text.downcase.scan(/\p{L}+|\d+/).each { |w| v[Zlib.crc32(w) % Rag::EMBED_DIM] += 1.0 }
+    norm = Math.sqrt(v.sum { |x| x * x })
+    norm.zero? ? v : v.map { |x| x / norm }
+  end
+end
+
+class FakeExtractor
+  attr_reader :calls
+
+  def initialize(files)
+    @files = files
+    @calls = []
+  end
+
+  def pages(path)
+    @calls << path
+    r = @files.fetch(File.basename(path))
+    raise r if r.is_a?(Exception)
+    r.map(&:dup)
+  end
+end
