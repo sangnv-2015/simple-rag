@@ -136,13 +136,16 @@ class ApiTest < Minitest::Test
   end
 
   def test_upload_invalid_metadata_is_422_with_field
-    [{ "title" => "" }, { "version" => "0" }, { "version" => "x" }, { "valid_from" => "nope" },
-     { "valid_from" => "2027-01-01" }].each do |meta|
+    [[{ "title" => "" }, "title"], [{ "version" => "0" }, "version"], [{ "version" => "x" }, "version"],
+     [{ "valid_from" => "nope" }, "valid_from"], [{ "valid_to" => "nope" }, "valid_to"],
+     [{ "valid_from" => "2027-01-01" }, "valid_to"]].each do |meta, field|
       r = upload(meta: meta)
       assert_equal 422, r.status, meta.inspect
+      assert_equal "application/json", r.content_type
       b = json(r)
-      assert_equal meta.keys.first, b["field"] if meta.size == 1 && meta.key?("title")
-      assert b["error"] && b["field"] && b["detail"], meta.inspect
+      assert_equal ["invalid metadata", field], [b["error"], b["field"]], meta.inspect
+      assert_match(/\A[\x20-\x7e]+\z/, b["detail"], meta.inspect)
+      assert_includes b["detail"], field
     end
     assert_empty @store.documents
     assert_empty @worker.enqueued
@@ -152,6 +155,7 @@ class ApiTest < Minitest::Test
     r = upload(name: "a.txt")
     assert_equal 422, r.status
     assert_equal "file", json(r)["field"]
+    assert_equal "only .pdf and .docx files are accepted", json(r)["detail"]
     assert_empty @store.documents
   end
 
@@ -252,7 +256,7 @@ class ApiTest < Minitest::Test
 
   def test_llm_error_is_502_and_other_errors_500
     add("A")
-    @llm = FakeLLM.new { Rag::Error.new("secret detail") }
+    @llm = FakeLLM.new { Rag::DeepSeek::Error.new("secret detail") }
     r = call("POST", "/api/ask", body: { question: Q })
     assert_equal [502, { "error" => "upstream error" }], [r.status, json(r)]
     @llm = FakeLLM.new { RuntimeError.new("boom") }
@@ -282,11 +286,24 @@ class ApiTest < Minitest::Test
     b = call("GET", "/api/docs", tenant: nil).body
     assert_match(%r{swagger-ui-dist@5\.\d+\.\d+/swagger-ui-bundle\.js}, b)
     assert_includes b, "/api/openapi.yaml"
+    assert_equal 2, b.scan(/integrity="sha384-[A-Za-z0-9+\/=]+" crossorigin="anonymous"/).size
   end
 
   def test_origin_check
     add("A")
     assert_equal 200, call("POST", "/api/search", body: { question: Q }, env: { "HTTP_ORIGIN" => "http://localhost:4567" }).status
-    assert_equal 403, call("POST", "/api/search", body: { question: Q }, env: { "HTTP_ORIGIN" => "http://evil.example" }).status
+    r = call("POST", "/api/search", body: { question: Q }, env: { "HTTP_ORIGIN" => "http://evil.example" })
+    assert_equal [403, "application/json", { "error" => "cross-origin request refused" }], [r.status, r.content_type, json(r)]
+  end
+
+  def test_upload_over_cap_is_english_json_413
+    r = call("POST", "/api/documents", env: { "CONTENT_LENGTH" => (Rag::MAX_UPLOAD_BYTES + 2 * 1024 * 1024).to_s,
+                                              "CONTENT_TYPE" => "multipart/form-data; boundary=x", input: "" })
+    assert_equal [413, "application/json", { "error" => "request body too large" }], [r.status, r.content_type, json(r)]
+  end
+
+  def test_unknown_api_path_is_json_404
+    r = call("GET", "/api/nope")
+    assert_equal [404, "application/json", { "error" => "not found" }], [r.status, r.content_type, json(r)]
   end
 end

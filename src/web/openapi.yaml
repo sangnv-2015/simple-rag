@@ -87,6 +87,13 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+          example: { error: "X-Tenant-Id header is missing or unknown" }
+    Forbidden:
+      description: Cross-origin request refused.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: "cross-origin request refused" }
     NotFound:
       description: Document not found in this tenant.
       content:
@@ -133,6 +140,7 @@ paths:
                     error: null
                     chunk_count: 8
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
     post:
       summary: Upload a document (ingested in the background)
       parameters:
@@ -167,12 +175,13 @@ paths:
                   status: { type: string }
               example: { id: 3, status: processing }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "422":
           description: Invalid metadata or a rejected file.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
-              example: { error: "invalid metadata", field: version, detail: "Version must be a positive integer." }
+              example: { error: "invalid metadata", field: version, detail: "version must be a positive integer" }
   /api/documents/{id}/chunks:
     get:
       summary: List a document's chunks
@@ -200,6 +209,7 @@ paths:
                 chunks:
                   - { id: 12, chunk_index: 0, page: 4, text: "Refunds are paid within 14 days." }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/documents/{id}:
     delete:
@@ -219,6 +229,7 @@ paths:
                   deleted: { type: boolean }
               example: { id: 3, deleted: true }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/search:
     post:
@@ -256,6 +267,7 @@ paths:
                 chunks:
                   - { chunk_id: 12, document_id: 3, title: Refund policy, version: 2, page: 4, score: 0.812, content: "Refunds are paid within 14 days." }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "413": { $ref: "#/components/responses/TooLarge" }
         "500":
           description: Internal error.
@@ -307,6 +319,7 @@ paths:
                 chunks:
                   - { chunk_id: 12, document_id: 3, title: Refund policy, version: 2, page: 4, score: 0.812, content: "Refunds are paid within 14 days." }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "413": { $ref: "#/components/responses/TooLarge" }
         "502":
           description: Upstream model error.

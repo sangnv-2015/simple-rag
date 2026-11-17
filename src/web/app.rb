@@ -58,11 +58,13 @@ class Web < Sinatra::Base
   def call!(env)
     origin = env["HTTP_ORIGIN"]
     # Every method: a cross-site POST /ask would spend paid model calls. Plain navigations send no Origin.
-    if origin && !local_origin?(origin)
-      return [403, { "content-type" => "text/plain; charset=utf-8" }, ["Yêu cầu không hợp lệ."]]
+    api = env["PATH_INFO"].to_s.start_with?("/api")
+    reject = lambda do |status, vi, en|
+      api ? [status, { "content-type" => "application/json" }, [JSON.generate(error: en)]] : [status, { "content-type" => "text/plain; charset=utf-8" }, [vi]]
     end
+    return reject.call(403, "Yêu cầu không hợp lệ.", "cross-origin request refused") if origin && !local_origin?(origin)
     if env["CONTENT_LENGTH"].to_i > settings.max_upload_bytes + MULTIPART_OVERHEAD
-      return [413, { "content-type" => "text/plain; charset=utf-8" }, [TOO_LARGE]]
+      return reject.call(413, TOO_LARGE, "request body too large")
     end
     super
   end

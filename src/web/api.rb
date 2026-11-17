@@ -8,7 +8,22 @@ module WebApi
   MAX_IDS = 200
   MAX_ID = 2**31 - 1
   SWAGGER = "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14".freeze
+  # sha384 of the exact pinned files (recompute when the version changes)
+  CSS_SRI = "sha384-wxLW6kwyHktdDGr6Pv1zgm/VGJh99lfUbzSn6HNHBENZlCN7W602k9VkGdxuFvPn".freeze
+  JS_SRI = "sha384-wmyclcVGX/WhUkdkATwhaK1X1JtiNrr2EoYJ+diV3vj4v6OC5yCeSu+yW13SYJep".freeze
   SPEC = File.expand_path("openapi.yaml", __dir__)
+  META_DETAIL = {
+    "title" => "title must be 1 to 200 characters",
+    "version" => "version must be a positive integer",
+    "valid_from" => "valid_from must be a date as YYYY-MM-DD",
+    "valid_to" => "valid_to must be a date as YYYY-MM-DD and not before valid_from",
+    "tenant_id" => "tenant is not valid"
+  }.freeze
+  FILE_DETAIL = {
+    "Chỉ nhận file .pdf và .docx." => "only .pdf and .docx files are accepted",
+    "File quá lớn (tối đa 30 MB)." => "file is too large (max 30 MB)",
+    "Tên file không hợp lệ." => "file name is not valid"
+  }.freeze
   PUBLIC = ["/api/openapi.yaml", "/api/docs"].freeze
 
   def self.chunk(hit)
@@ -29,7 +44,7 @@ module WebApi
     # Unexpected errors become JSON; the class is logged, never the message.
     def api
       yield
-    rescue Rag::Error => e
+    rescue Rag::DeepSeek::Error => e
       warn "api upstream error: #{e.class}"
       fail!(502, "upstream error")
     rescue StandardError => e
@@ -91,6 +106,12 @@ module WebApi
       @tenant = t
     end
 
+    app.not_found do
+      next unless request.path_info.start_with?("/api/")
+      content_type :json
+      JSON.generate(error: "not found")
+    end
+
     app.get("/api/openapi.yaml") do
       content_type "application/yaml; charset=utf-8"
       File.read(SPEC)
@@ -101,9 +122,9 @@ module WebApi
       <<~HTML
         <!doctype html>
         <html><head><meta charset="utf-8"><title>NUSAskify API</title>
-        <link rel="stylesheet" href="#{SWAGGER}/swagger-ui.css"></head>
+        <link rel="stylesheet" href="#{SWAGGER}/swagger-ui.css" integrity="#{CSS_SRI}" crossorigin="anonymous"></head>
         <body><div id="ui"></div>
-        <script src="#{SWAGGER}/swagger-ui-bundle.js"></script>
+        <script src="#{SWAGGER}/swagger-ui-bundle.js" integrity="#{JS_SRI}" crossorigin="anonymous"></script>
         <script>SwaggerUIBundle({ url: "/api/openapi.yaml", dom_id: "#ui" });</script>
         </body></html>
       HTML
@@ -117,9 +138,9 @@ module WebApi
         begin
           prep = accept_upload(@tenant, params, file)
         rescue Rag::Meta::Invalid => e
-          fail!(422, "invalid metadata", field: e.field.to_s, detail: e.message)
+          fail!(422, "invalid metadata", field: e.field.to_s, detail: META_DETAIL.fetch(e.field.to_s, "metadata is not valid"))
         rescue Rag::Upload::Rejected => e
-          fail!(422, "invalid file", field: "file", detail: e.message)
+          fail!(422, "invalid file", field: "file", detail: FILE_DETAIL.fetch(e.message, "file was rejected"))
         end
         respond({ id: prep.id, status: settings.store.document(prep.id).status }, 202)
       end
