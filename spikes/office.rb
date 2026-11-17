@@ -33,9 +33,10 @@ check "[3] pdffonts: #{fonts.join(', ')}", fonts.any? { |f| f =~ /Noto|Liberatio
 
 text = run("pdftotext", "-layout", "#{dir}/vi.pdf", "-").unicode_normalize(:nfc)
 check "[3/4] pdftotext round trip equals source text after NFC", text.gsub(/\s+/, " ").include?(line.unicode_normalize(:nfc))
-check "[4] table row 'Nghỉ phép năm' keeps its number on the same line after whitespace", text.match?(/Nghỉ phép năm\s+12/)
+rows = text.lines.grep(/Nghỉ phép năm[ \t]+12/)
+check "[4] both tables' row 'Nghỉ phép năm' keeps its number on the same line (2 rows matched)", rows.size == 2
 
-puts "[4-info] full-width table row: #{text.lines.grep(/Nghỉ phép năm/).last.to_s.rstrip}"
+rows.each_with_index { |r, i| puts "[4-info] table #{i + 1} row: #{r.rstrip}" }
 
 run("pdftoppm", "-png", "-r", "80", "-f", "1", "-l", "1", "#{dir}/vi.pdf", "#{dir}/vi")
 puts "[3] wrote #{Dir["#{dir}/vi-*.png"].first} (human: open it, no boxes or missing marks)"
