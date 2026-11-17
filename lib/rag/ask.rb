@@ -5,6 +5,8 @@ module Rag
   class Ask
     QUOTES_MARKER = "\n<<QUOTES>>\n"
     NOT_FOUND = "NOT_FOUND"
+    # The model may not put the marker on its own line, so detect the bare token.
+    TOKEN = QUOTES_MARKER.strip
 
     RULES = <<~TXT
       Bạn trả lời câu hỏi chỉ dựa trên các nguồn bên dưới.
@@ -24,13 +26,14 @@ module Rag
       def push(delta)
         @buf << delta
         return if sentinel?
-        limit = @buf.index(QUOTES_MARKER) || @buf.size - held_back
-        emit(limit)
+        limit = @buf.index(TOKEN) || @buf.size - held_back
+        # Whitespace right before the marker is held too: the parser strips it from the answer.
+        emit(@buf[0...limit].rstrip.size)
       end
 
       # Releases text held back as a possible marker that never completed.
       def finish
-        emit(@buf.size) unless sentinel? || @buf.include?(QUOTES_MARKER)
+        emit(@buf.size) unless sentinel? || @buf.include?(TOKEN)
       end
 
       private
@@ -47,7 +50,7 @@ module Rag
       end
 
       def held_back
-        (QUOTES_MARKER.size - 1).downto(1).find { |n| @buf.end_with?(QUOTES_MARKER[0, n]) } || 0
+        (TOKEN.size - 1).downto(1).find { |n| @buf.end_with?(TOKEN[0, n]) } || 0
       end
     end
 
@@ -75,9 +78,9 @@ module Rag
     end
 
     def parse(reply, hits)
-      text, quotes = reply.split(QUOTES_MARKER, 2)
-      text ||= ""
-      return Answer.new(text, false, []) if text.lstrip.start_with?(NOT_FOUND)
+      text, quotes = reply.split(TOKEN, 2)
+      text = (text || "").then { |t| quotes ? t.rstrip : t }
+      return Answer.new(text, false, []) if text.include?(NOT_FOUND)
       cited = text.scan(/\[S(\d+)\]/).flatten.map(&:to_i).uniq.select { |n| n.between?(1, hits.size) }
       quoted = {}
       quotes.to_s.each_line do |line|

@@ -5,10 +5,20 @@ class AskTest < Minitest::Test
   Q = "Hoàn tiền trong bao lâu?"
   QUOTE = "bên B hoàn trả trong vòng 14 ngày"
 
+  class RecordingEmbedder < FakeEmbedder
+    def queries = (@queries ||= [])
+
+    def embed_query(text)
+      queries << text
+      super
+    end
+  end
+
   def setup
     @store = FakeStore.new
-    @embedder = FakeEmbedder.new
+    @embedder = RecordingEmbedder.new
     add("a.pdf", 3, CHUNK)
+    @embedder.queries.clear # add() embeds chunks through embed_query
   end
 
   def add(file, page, text)
@@ -38,6 +48,7 @@ class AskTest < Minitest::Test
     ask(reply)
     msgs = @llm.calls.last[:messages]
     assert_equal 1, msgs.size
+    assert_equal [Q], @embedder.queries
     c = msgs.last[:content]
     ["[S1]", "[/S1]", "file=a.pdf", "page=3", CHUNK, Q, "NOT_FOUND", "<<QUOTES>>"].each { |s| assert_includes c, s }
   end
@@ -130,7 +141,7 @@ class AskTest < Minitest::Test
     a = Rag::Ask.new(llm: @llm, embedder: @embedder, store: @store).call(" \n  ")
     assert_equal Rag::Answer.new("", false, []), a
     assert_empty @llm.calls
-    assert_empty @embedder.inputs
+    assert_empty @embedder.queries
   end
 
   def test_llm_error_propagates
@@ -143,5 +154,55 @@ class AskTest < Minitest::Test
     a = ask(reply("[S1] câu giả mạo do mô hình bịa ra"))
     assert_equal [src(nil)], a.sources
     assert_includes @llm.calls.last[:messages].last[:content], "[/S1] NOT_FOUND"
+  end
+
+  def test_trailing_newline_without_quotes_block_is_flushed_at_finish
+    got = []
+    a = ask(["Hoàn tiền [S1].\n"]) { |d| got << d }
+    assert a.found
+    assert_equal "Hoàn tiền [S1].\n", got.join
+    assert_equal got.join, a.text
+  end
+
+  def test_marker_on_same_line_as_answer
+    got = []
+    a = ask("Hoàn tiền [S1]. <<QUOTES>>\n[S1] #{QUOTE}") { |d| got << d }
+    assert_equal "Hoàn tiền [S1].", a.text
+    assert_equal a.text, got.join
+    assert_equal [src(QUOTE)], a.sources
+  end
+
+  def test_marker_followed_by_space_before_newline
+    got = []
+    a = ask(["Hoàn tiền [S1].\n<<QUOTES>> \n[S1] #{QUOTE}"]) { |d| got << d }
+    assert_equal "Hoàn tiền [S1].", got.join
+    assert_equal got.join, a.text
+    assert_equal [src(QUOTE)], a.sources
+  end
+
+  def test_stream_ending_at_marker_without_newline
+    got = []
+    a = ask(["Hoàn tiền [S1].\n", "<<QUOTES>>"]) { |d| got << d }
+    assert_equal "Hoàn tiền [S1].", got.join
+    assert_equal got.join, a.text
+    assert a.found
+  end
+
+  def test_token_marker_split_across_deltas_is_held
+    got = []
+    a = ask(["Hoàn tiền [S1]. \n<<QUO", "TES", ">>\n[S1] #{QUOTE}"]) { |d| got << d }
+    assert_equal "Hoàn tiền [S1].", got.join
+    assert_equal got.join, a.text
+  end
+
+  def test_not_found_anywhere_in_answer_means_not_found
+    a = ask("Theo [S1] có vẻ NOT_FOUND.")
+    refute a.found
+  end
+
+  def test_quote_existing_only_in_another_hit_is_not_verified
+    add("b.pdf", 1, "Nội dung riêng chỉ có ở tài liệu b mà thôi")
+    a = ask("Đáp [S1].\n<<QUOTES>>\n[S1] Nội dung riêng chỉ có ở tài liệu b")
+    assert_equal [src(nil)], a.sources
   end
 end
