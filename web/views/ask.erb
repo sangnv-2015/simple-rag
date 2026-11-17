@@ -20,7 +20,7 @@
 
   function addSource(s) {
     var li = document.createElement("li"), a = document.createElement("a");
-    a.href = "/documents/" + encodeURIComponent(s.filename) + "?page=" + encodeURIComponent(s.page);
+    a.href = "/documents/" + encodeURIComponent(s.filename) + "?page=" + encodeURIComponent(s.page) + "#page-" + encodeURIComponent(s.page);
     a.textContent = "[" + s.n + "] " + s.filename + " · trang " + s.page + (s.docx ? " (bản PDF)" : "");
     li.appendChild(a);
     var q = document.createElement("span");

@@ -63,11 +63,11 @@ class DocumentsRouteTest < Minitest::Test
     add("wait.pdf")
     @worker.names = ["busy.pdf", "wait.pdf"]
     body = get("/documents").body
-    assert_includes body, "done.pdf"
-    assert_includes body, "xong"
-    assert_includes body, "đang xử lý"
-    assert_includes body, "lỗi: file scan, không đọc được"
-    assert_includes body, "đang chờ"
+    row = ->(name) { body[%r{<tr>(?:(?!</tr>).)*#{Regexp.escape(name)}\.pdf(?:(?!</tr>).)*</tr>}m] }
+    assert_match(%r{done\.pdf.*<td>2</td>\s*<td>0</td>\s*<td>xong</td>}m, row.("done"))
+    assert_includes row.("busy"), "đang xử lý"
+    assert_includes row.("bad"), "lỗi: file scan, không đọc được"
+    assert_includes row.("wait"), "đang chờ"
     assert_includes body, "Số trang"
     assert_includes body, "Số đoạn"
     assert_includes body, 'name="file"'
@@ -149,16 +149,47 @@ class DocumentsRouteTest < Minitest::Test
 
   def test_upload_unexpected_failure_is_500_with_fixed_message_and_class_only_logged
     FileUtils.remove_entry(@dir) # realpath of the documents dir now raises Errno::ENOENT
-    _, err = capture_io do
-      res = upload
-      assert_equal 500, res.status
-      assert_includes res.body, "Không tải được file lên. Vui lòng thử lại."
-      refute_includes res.body, @dir
+    begin
+      _, err = capture_io do
+        res = upload
+        assert_equal 500, res.status
+        assert_includes res.body, "Không tải được file lên. Vui lòng thử lại."
+        refute_includes res.body, @dir
+      end
+      assert_includes err, "Errno::ENOENT"
+      refute_includes err, @dir
+      assert_empty @worker.enqueued
+    ensure
+      Dir.mkdir(@dir)
     end
-    assert_includes err, "Errno::ENOENT"
-    refute_includes err, @dir
-    assert_empty @worker.enqueued
-    Dir.mkdir(@dir)
+  end
+
+  def test_percent_encoded_path_does_not_bypass_origin_or_size_guard
+    res = Rack::MockRequest.new(app).post("/%64ocuments", "HTTP_HOST" => HOST, "HTTP_ORIGIN" => "http://evil.example",
+      "CONTENT_TYPE" => "multipart/form-data; boundary=x", input: "--x--\r\n")
+    assert_equal 403, res.status
+    assert_empty Dir.children(@dir)
+    res = Rack::MockRequest.new(app(max: 1000)).post("/%64ocuments", "HTTP_HOST" => HOST,
+      "CONTENT_TYPE" => "multipart/form-data; boundary=x", "CONTENT_LENGTH" => (1000 + 1024 * 1024 + 1).to_s, input: StringIO.new)
+    assert_equal 413, res.status
+  end
+
+  def test_file_param_without_a_real_upload_is_400
+    res = Rack::MockRequest.new(app).post("/documents", "HTTP_HOST" => HOST,
+      "CONTENT_TYPE" => "application/x-www-form-urlencoded", input: "file[tempfile]=x&file[filename]=a.pdf")
+    assert_equal 400, res.status
+    assert_includes res.body, "Chọn một file để tải lên."
+  end
+
+  def test_rejection_message_page_does_not_auto_refresh
+    @worker.names = ["busy.pdf"]
+    res = upload(name: "a.txt")
+    assert_equal 422, res.status
+    refute_includes res.body, 'http-equiv="refresh"'
+  end
+
+  def test_temp_files_are_reaped_by_middleware
+    assert Web.middleware.any? { |m| m.first == Rack::TempfileReaper }
   end
 
   def test_upload_with_huge_content_length_is_413_without_reading_body
@@ -197,6 +228,15 @@ class DocumentsRouteTest < Minitest::Test
     refute_match(/id="page-1"[^>]*current/, body)
     assert_includes body, 'href="/documents"'
     assert_includes body, "Hỏi đáp"
+  end
+
+  def test_viewer_marks_docx_pages_as_pdf_version
+    add("a.docx", pages: [page(1), page(2)])
+    add("b.pdf", pages: [page(1)])
+    body = get("/documents/a.docx?page=2").body
+    assert_includes body, "Trang 2 (bản PDF)"
+    assert_includes body, 'id="page-2"'
+    refute_includes get("/documents/b.pdf").body, "bản PDF"
   end
 
   def test_viewer_ignores_invalid_or_out_of_range_page

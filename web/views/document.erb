@@ -2,7 +2,7 @@
 <h2><%= h @name %></h2>
 <% @pages.each do |pg| %>
 <section class="page<%= " current" if pg.number == @current %>" id="page-<%= h pg.number %>">
-  <h3>Trang <%= h pg.number %></h3>
+  <h3>Trang <%= h pg.number %><%= " (bản PDF)" if @name.downcase.end_with?(".docx") %></h3>
 <% if !pg.readable %>
   <p class="flag">Trang không đọc được (không có lớp chữ)</p>
 <% else %>

@@ -17,6 +17,7 @@ class Web < Sinatra::Base
 
   set :views, File.expand_path("views", __dir__)
   set :host_authorization, permitted_hosts: ["localhost", "127.0.0.1", "[::1]"]
+  use Rack::TempfileReaper
   set :show_exceptions, false
   set :ask, nil
   set :store, nil
@@ -29,13 +30,14 @@ class Web < Sinatra::Base
   LOCAL_ORIGIN_HOSTS = ["localhost", "127.0.0.1", "[::1]"].freeze
 
   # Runs before Rack parses (and spools) the body, so a huge or cross-site upload is refused unread.
+  # Path-independent on purpose: Mustermann also matches percent-encoded paths (/%64ocuments).
   def call!(env)
-    if env["REQUEST_METHOD"] == "POST" && env["PATH_INFO"] == "/documents"
-      origin = env["HTTP_ORIGIN"]
-      return [403, { "content-type" => "text/plain; charset=utf-8" }, ["Yêu cầu không hợp lệ."]] if origin && !local_origin?(origin)
-      if env["CONTENT_LENGTH"].to_i > settings.max_upload_bytes + MULTIPART_OVERHEAD
-        return [413, { "content-type" => "text/plain; charset=utf-8" }, [TOO_LARGE]]
-      end
+    origin = env["HTTP_ORIGIN"]
+    if !%w[GET HEAD].include?(env["REQUEST_METHOD"]) && origin && !local_origin?(origin)
+      return [403, { "content-type" => "text/plain; charset=utf-8" }, ["Yêu cầu không hợp lệ."]]
+    end
+    if env["CONTENT_LENGTH"].to_i > settings.max_upload_bytes + MULTIPART_OVERHEAD
+      return [413, { "content-type" => "text/plain; charset=utf-8" }, [TOO_LARGE]]
     end
     super
   end
@@ -83,7 +85,7 @@ class Web < Sinatra::Base
 
   post "/documents" do
     file = params[:file]
-    halt 400, list_page("Chọn một file để tải lên.") unless file.is_a?(Hash) && file[:tempfile]
+    halt 400, list_page("Chọn một file để tải lên.") unless file.is_a?(Hash) && file[:tempfile].respond_to?(:read)
     begin
       path = Rag::Upload.save(filename: file[:filename], io: file[:tempfile],
                               dir: settings.documents_dir, max_bytes: settings.max_upload_bytes)
@@ -125,7 +127,7 @@ class Web < Sinatra::Base
     end
     known = docs.map(&:filename)
     (pending - known).uniq.each { |n| @rows << [n, nil, nil, "đang chờ"] }
-    @refresh = !pending.empty?
+    @refresh = message.nil? && !pending.empty?
     erb :documents
   end
 end
