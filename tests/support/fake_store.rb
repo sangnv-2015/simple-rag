@@ -28,7 +28,7 @@ class FakeStore
   end
 
   def finish_document(id, pages:, chunks:)
-    e = @docs.fetch(id)
+    e = @docs[id] or raise Rag::Error, "Tài liệu đã bị xóa trong khi xử lý."
     e[:pages] = pages.map { |p| p.dup.tap { |q| q.raw_text = nul(q.raw_text); q.markdown = nul(q.markdown) } }
     e[:chunks] = chunks.map { |c| c.dup.tap { |d| d.text = nul(d.text); d.id = (@next_chunk_id += 1) } }
     me = e[:doc]

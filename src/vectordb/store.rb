@@ -69,6 +69,8 @@ module Rag
     def finish_document(id, pages:, chunks:)
       with_conn do
         @conn.transaction do
+          # Deleted while ingesting: fail cleanly before touching pages/chunks.
+          raise Rag::Error, "Tài liệu đã bị xóa trong khi xử lý." if @conn.exec_params("SELECT 1 FROM documents WHERE id = $1 FOR UPDATE", [id]).ntuples.zero?
           pages.each do |p|
             @conn.exec_params(
               "INSERT INTO pages(document_id, number, raw_text, markdown, readable, fallback) VALUES ($1,$2,$3,$4,$5,$6)",

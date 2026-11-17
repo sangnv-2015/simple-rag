@@ -16,6 +16,10 @@ class IngestTest < Minitest::Test
     Rag::Page.new(number: n, raw_text: text, markdown: nil, readable: readable, fallback: false)
   end
 
+  def meta(**o) = Rag::Meta.new(tenant_id: "nus", title: "T", version: 1, valid_from: Date.new(2026, 1, 1), valid_to: Date.new(2099, 12, 31), **o)
+
+  def metas(*names) = names.to_h { |n| [Rag::Text.nfc(n), meta(title: n)] }
+
   def write(name, body = "x") = File.join(@dir, name).tap { |p| File.write(p, body) }
 
   def ingest(files, opts = {})
@@ -25,7 +29,7 @@ class IngestTest < Minitest::Test
 
   def test_ingests_file_and_stores_pages_chunks_with_page_numbers
     path = write("a.pdf")
-    report = ingest("a.pdf" => [page(1), page(2)]).call(path)
+    report = ingest("a.pdf" => [page(1), page(2)]).call(path, meta)
     assert_equal ["a.pdf"], report.ok
     refute report.failed?
     assert_equal "done", by_name(@store, "a.pdf").status
@@ -39,9 +43,9 @@ class IngestTest < Minitest::Test
   def test_unchanged_file_is_skipped_without_llm_or_extractor_calls
     path = write("a.pdf")
     ing = ingest("a.pdf" => [page(1)])
-    ing.call(path)
+    ing.call(path, meta)
     llm_n, ext_n = @llm.calls.size, @extractor.calls.size
-    report = ing.call(path)
+    report = ing.call(path, meta)
     assert_equal ["a.pdf"], report.skipped
     assert_equal llm_n, @llm.calls.size
     assert_equal ext_n, @extractor.calls.size
@@ -49,9 +53,9 @@ class IngestTest < Minitest::Test
 
   def test_changed_file_replaces_old_data
     path = write("a.pdf", "v1")
-    ingest("a.pdf" => [page(1, "Bản cũ 111")]).call(path)
+    ingest("a.pdf" => [page(1, "Bản cũ 111")]).call(path, meta)
     File.write(path, "v2")
-    ingest("a.pdf" => [page(1, "Bản mới 222")]).call(path)
+    ingest("a.pdf" => [page(1, "Bản mới 222")]).call(path, meta)
     assert_equal 1, @store.documents.size
     texts = @store.search(@embedder.embed_query("bản"), 10, tenant_id: "nus").map(&:text).join
     assert_includes texts, "Bản mới 222"
@@ -62,7 +66,7 @@ class IngestTest < Minitest::Test
     write("bad.pdf")
     write("good.pdf")
     err = Rag::Extract::Error.new("File hỏng")
-    report = ingest("bad.pdf" => err, "good.pdf" => [page(1)]).call(@dir)
+    report = ingest("bad.pdf" => err, "good.pdf" => [page(1)]).call(@dir, metas(*Dir.children(@dir)))
     assert_equal [["bad.pdf", "File hỏng"]], report.failed
     assert_equal ["good.pdf"], report.ok
     assert report.failed?
@@ -77,7 +81,7 @@ class IngestTest < Minitest::Test
   def test_too_many_pages_fails_before_any_llm_call
     path = write("a.pdf")
     pages = (1..Rag::MAX_PAGES + 1).map { |n| page(n) }
-    report = ingest("a.pdf" => pages).call(path)
+    report = ingest("a.pdf" => pages).call(path, meta)
     assert_equal [["a.pdf", "Tài liệu quá dài (tối đa 200 trang)."]], report.failed
     assert_empty @llm.calls
     assert_equal "error", by_name(@store, "a.pdf").status
@@ -85,14 +89,14 @@ class IngestTest < Minitest::Test
 
   def test_exactly_max_pages_is_accepted
     path = write("a.pdf")
-    report = ingest("a.pdf" => (1..Rag::MAX_PAGES).map { |n| page(n, "Trang #{n} nội dung", readable: n == 1) }).call(path)
+    report = ingest("a.pdf" => (1..Rag::MAX_PAGES).map { |n| page(n, "Trang #{n} nội dung", readable: n == 1) }).call(path, meta)
     assert_equal ["a.pdf"], report.ok
   end
 
   def test_oversized_page_skips_the_llm_and_is_chunked_from_raw_text
     path = write("a.pdf")
     long = ("Điều khoản dài. " * 2000)[0, Rag::MAX_PAGE_CHARS + 1]
-    ingest("a.pdf" => [page(1, long), page(2)]).call(path)
+    ingest("a.pdf" => [page(1, long), page(2)]).call(path, meta)
     assert_equal 1, @llm.calls.size # only page 2
     stored = @store.pages(by_name(@store, "a.pdf").id)
     assert_equal [true, false], stored.map(&:fallback)
@@ -105,7 +109,7 @@ class IngestTest < Minitest::Test
   def test_unreadable_page_is_marked_and_not_sent_to_llm
     path = write("a.pdf")
     pages = [page(1), page(2, "", readable: false), page(3)]
-    ingest("a.pdf" => pages).call(path)
+    ingest("a.pdf" => pages).call(path, meta)
     stored = @store.pages(by_name(@store, "a.pdf").id)
     assert_equal [true, false, true], stored.map(&:readable)
     assert_nil stored[1].markdown
@@ -115,7 +119,7 @@ class IngestTest < Minitest::Test
 
   def test_file_with_only_unreadable_pages_fails_with_scan_message
     path = write("a.pdf")
-    report = ingest("a.pdf" => [page(1, "", readable: false)]).call(path)
+    report = ingest("a.pdf" => [page(1, "", readable: false)]).call(path, meta)
     assert_equal [["a.pdf", "file scan, không đọc được"]], report.failed
   end
 
@@ -123,7 +127,7 @@ class IngestTest < Minitest::Test
     path = write("a.pdf")
     llm = FakeLLM.new { "# Tổng cộng" }
     store = FakeStore.new
-    report = ingest({ "a.pdf" => [page(1, "Tổng 1.250.000 đồng")] }, store: store, llm: llm).call(path)
+    report = ingest({ "a.pdf" => [page(1, "Tổng 1.250.000 đồng")] }, store: store, llm: llm).call(path, meta)
     assert_equal ["a.pdf"], report.ok
     p = store.pages(by_name(store, "a.pdf").id).first
     assert p.fallback
@@ -133,8 +137,8 @@ class IngestTest < Minitest::Test
 
   def test_error_status_with_same_hash_is_retried_not_skipped
     path = write("a.pdf")
-    ingest("a.pdf" => Rag::Extract::Error.new("lỗi")).call(path)
-    report = ingest("a.pdf" => [page(1)]).call(path)
+    ingest("a.pdf" => Rag::Extract::Error.new("lỗi")).call(path, meta)
+    report = ingest("a.pdf" => [page(1)]).call(path, meta)
     assert_equal ["a.pdf"], report.ok
     assert_empty report.skipped
     assert_equal "done", by_name(@store, "a.pdf").status
@@ -144,7 +148,7 @@ class IngestTest < Minitest::Test
     path = write("a.pdf")
     n = 0
     llm = FakeLLM.new { |m| (n += 1) == 2 ? Rag::DeepSeek::Error.new("DeepSeek bận") : "# ok 1" }
-    report = ingest({ "a.pdf" => [page(1, "ok 1"), page(2, "ok 2")] }, llm: llm).call(path)
+    report = ingest({ "a.pdf" => [page(1, "ok 1"), page(2, "ok 2")] }, llm: llm).call(path, meta)
     assert_equal [["a.pdf", "DeepSeek bận"]], report.failed
     doc = by_name(@store, "a.pdf")
     assert_equal "error", doc.status
@@ -155,14 +159,14 @@ class IngestTest < Minitest::Test
 
   def test_directory_takes_only_pdf_and_docx_case_insensitive_sorted
     %w[b.docx c.txt a.PDF].each { |n| write(n) }
-    report = ingest("a.PDF" => [page(1)], "b.docx" => [page(1)]).call(@dir)
+    report = ingest("a.PDF" => [page(1)], "b.docx" => [page(1)]).call(@dir, metas(*Dir.children(@dir)))
     assert_equal ["a.PDF", "b.docx"], report.ok
     assert_empty report.failed
   end
 
   def test_empty_directory_reports_no_files
     write("c.txt")
-    report = ingest({}).call(@dir)
+    report = ingest({}).call(@dir, metas(*Dir.children(@dir)))
     assert_empty report.ok
     assert_equal "Không có file .pdf/.docx nào trong #{@dir}", report.summary
   end
@@ -171,16 +175,16 @@ class IngestTest < Minitest::Test
     ok = write("a.pdf")
     txt = write("c.txt")
     ing = ingest("a.pdf" => [page(1)])
-    assert_equal ["a.pdf"], ing.call(ok).ok
-    assert_equal [["c.txt", "Chỉ nhận file .pdf và .docx."]], ing.call(txt).failed
+    assert_equal ["a.pdf"], ing.call(ok, meta).ok
+    assert_equal [["c.txt", "Chỉ nhận file .pdf và .docx."]], ing.call(txt, meta).failed
   end
 
   def test_nfd_named_file_with_same_content_is_the_same_document
     nfc = "Quy định.pdf".unicode_normalize(:nfc)
     nfd = nfc.unicode_normalize(:nfd)
     ing = ingest(nfc => [page(1)], nfd => [page(1)])
-    ing.call(write(nfc))
-    report = ing.call(write(nfd, "x"))
+    ing.call(write(nfc), meta)
+    report = ing.call(write(nfd, "x"), meta)
     assert_equal [nfc], report.skipped.map { |f| f.unicode_normalize(:nfc) }
     assert_equal 1, @store.documents.size
     assert_equal nfc, @store.documents.first.filename
@@ -191,7 +195,7 @@ class IngestTest < Minitest::Test
     write("b.pdf")
     boom = RuntimeError.new("boom /secret/path")
     report = nil
-    _, err = capture_io { report = ingest("a.pdf" => boom, "b.pdf" => [page(1)]).call(@dir) }
+    _, err = capture_io { report = ingest("a.pdf" => boom, "b.pdf" => [page(1)]).call(@dir, metas(*Dir.children(@dir))) }
     assert_equal [["a.pdf", "Lỗi không xác định khi xử lý file."]], report.failed
     assert_equal ["b.pdf"], report.ok
     assert_equal "Lỗi không xác định khi xử lý file.", by_name(@store, "a.pdf").error
@@ -206,8 +210,99 @@ class IngestTest < Minitest::Test
     store = FakeStore.new
     def store.fail_document(*) = raise(PG::ConnectionBad, "db down")
     report = nil
-    capture_io { report = ingest({ "a.pdf" => Rag::Extract::Error.new("hỏng"), "b.pdf" => [page(1)] }, store: store).call(@dir) }
+    capture_io { report = ingest({ "a.pdf" => Rag::Extract::Error.new("hỏng"), "b.pdf" => [page(1)] }, store: store).call(@dir, metas(*Dir.children(@dir))) }
     assert_equal [["a.pdf", "hỏng"]], report.failed
     assert_equal ["b.pdf"], report.ok
+  end
+
+  def test_prepare_then_run_stores_document_with_metadata
+    path = write("a.pdf")
+    ing = ingest("a.pdf" => [page(1)])
+    m = meta(title: "Quy chế", version: 2)
+    prep = ing.prepare(path, m)
+    refute prep.skipped
+    assert_equal "a.pdf", prep.filename
+    assert_nil ing.run(prep.id, path)
+    d = @store.document(prep.id)
+    assert_equal ["done", "nus", "Quy chế", 2, Date.new(2026, 1, 1)], [d.status, d.tenant_id, d.title, d.version, d.valid_from]
+  end
+
+  def test_prepare_skips_same_sha_done_and_returns_existing_id
+    path = write("a.pdf")
+    ing = ingest("a.pdf" => [page(1)])
+    first = ing.prepare(path, meta)
+    ing.run(first.id, path)
+    again = ing.prepare(path, meta)
+    assert again.skipped
+    assert_equal first.id, again.id
+  end
+
+  def test_prepare_same_triple_new_sha_replaces
+    path = write("a.pdf", "v1")
+    ing = ingest("a.pdf" => [page(1)])
+    first = ing.prepare(path, meta)
+    ing.run(first.id, path)
+    File.write(path, "v2")
+    second = ing.prepare(path, meta)
+    refute second.skipped
+    refute_equal first.id, second.id
+    assert_nil @store.document(first.id)
+  end
+
+  def test_prepare_rejects_bad_extension_without_creating_a_row
+    err = assert_raises(Rag::Error) { ingest({}).prepare(write("c.txt"), meta) }
+    assert_equal "Chỉ nhận file .pdf và .docx.", err.message
+    assert_empty @store.documents
+  end
+
+  def test_file_without_metadata_is_listed_and_not_ingested
+    write("x.pdf")
+    report = ingest("x.pdf" => [page(1)]).call(@dir, {})
+    assert_equal ["x.pdf"], report.no_metadata
+    assert_includes report.summary, "Bỏ qua (thiếu metadata): x.pdf"
+    refute report.failed?
+    assert_empty @store.documents
+  end
+
+  def test_new_version_expires_old_version_end_to_end
+    p1 = write("v1.pdf")
+    p2 = write("v2.pdf", "other")
+    ing = ingest("v1.pdf" => [page(1, "Bản một 111")], "v2.pdf" => [page(1, "Bản hai 222")])
+    ing.call(p1, meta(version: 1))
+    ing.call(p2, meta(version: 2))
+    assert_equal "expired", by_name(@store, "v1.pdf").status
+    assert_equal "done", by_name(@store, "v2.pdf").status
+    texts = @store.search(@embedder.embed_query("bản"), 10, tenant_id: "nus").map(&:text).join
+    assert_includes texts, "Bản hai 222"
+    refute_includes texts, "Bản một"
+  end
+
+  def test_older_version_ingested_after_newer_is_expired
+    p1 = write("v1.pdf")
+    p2 = write("v2.pdf", "other")
+    ing = ingest("v1.pdf" => [page(1)], "v2.pdf" => [page(1)])
+    ing.call(p2, meta(version: 2))
+    ing.call(p1, meta(version: 1))
+    assert_equal "expired", by_name(@store, "v1.pdf").status
+    assert_equal "done", by_name(@store, "v2.pdf").status
+  end
+
+  def test_run_on_deleted_document_does_not_raise
+    path = write("a.pdf")
+    ing = ingest("a.pdf" => [page(1)])
+    prep = ing.prepare(path, meta)
+    @store.delete_document(prep.id, tenant_id: "nus")
+    msg = nil
+    capture_io { msg = ing.run(prep.id, path) }
+    assert_kind_of String, msg
+    assert_empty @store.documents
+  end
+
+  def test_run_failure_returns_message_and_marks_error
+    path = write("a.pdf")
+    ing = ingest("a.pdf" => Rag::Extract::Error.new("File hỏng"))
+    prep = ing.prepare(path, meta)
+    assert_equal "File hỏng", ing.run(prep.id, path)
+    assert_equal "error", @store.document(prep.id).status
   end
 end

@@ -8,6 +8,7 @@ rescue Rag::ConfigError => e
   warn e.message
   exit 2
 end
+manifest = Rag::Manifest.load
 paths = ARGV.empty? ? [sys.config.documents_dir] : ARGV
-reports = paths.map { |p| sys.ingest.call(p).tap { |r| puts r.summary } }
+reports = paths.map { |p| sys.ingest.call(p, manifest).tap { |r| puts r.summary } }
 exit(reports.any?(&:failed?) ? 1 : 0)

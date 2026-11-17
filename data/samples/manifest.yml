@@ -1,4 +1,4 @@
-- {src: quy-che-nghi-phep.html, out: data/raw/quy-che-nghi-phep.pdf, lang: vi, preload: true}
-- {src: quy-dinh-lam-viec-tu-xa.html, out: data/raw/quy-dinh-lam-viec-tu-xa.docx, lang: vi, preload: true}
-- {src: travel-expense-policy.html, out: data/raw/travel-expense-policy.pdf, lang: en, preload: true}
-- {src: chinh-sach-hoan-tien.html, out: data/samples/upload-demo/chinh-sach-hoan-tien.docx, lang: vi, preload: false}
+- {src: quy-che-nghi-phep.html, out: data/raw/quy-che-nghi-phep.pdf, lang: vi, preload: true, tenant: nus, title: "Quy chế nghỉ phép", version: 1, valid_from: "2026-01-01", valid_to: "2099-12-31"}
+- {src: quy-dinh-lam-viec-tu-xa.html, out: data/raw/quy-dinh-lam-viec-tu-xa.docx, lang: vi, preload: true, tenant: nus, title: "Quy định làm việc từ xa", version: 1, valid_from: "2026-01-01", valid_to: "2099-12-31"}
+- {src: travel-expense-policy.html, out: data/raw/travel-expense-policy.pdf, lang: en, preload: true, tenant: nus, title: "Travel expense policy", version: 1, valid_from: "2026-01-01", valid_to: "2099-12-31"}
+- {src: chinh-sach-hoan-tien.html, out: data/samples/upload-demo/chinh-sach-hoan-tien.docx, lang: vi, preload: false, tenant: nus, title: "Chính sách hoàn tiền", version: 1, valid_from: "2026-01-01", valid_to: "2099-12-31"}

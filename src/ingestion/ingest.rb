@@ -1,7 +1,7 @@
 require "digest"
 
 module Rag
-  Report = Struct.new(:ok, :skipped, :failed, :empty_dir) do
+  Report = Struct.new(:ok, :skipped, :failed, :empty_dir, :no_metadata) do
     def failed? = !failed.empty?
 
     def summary
@@ -9,27 +9,53 @@ module Rag
       lines = []
       lines << "OK: #{ok.join(", ")}" unless ok.empty?
       lines << "Bỏ qua (không đổi): #{skipped.join(", ")}" unless skipped.empty?
+      lines << "Bỏ qua (thiếu metadata): #{no_metadata.join(", ")}" unless no_metadata.empty?
       failed.each { |f, m| lines << "Lỗi: #{f} — #{m}" }
       lines.join("\n")
     end
   end
 
+  Prepared = Struct.new(:id, :skipped, :filename)
+
   class Ingest
     EXTENSIONS = %w[.pdf .docx].freeze
     UNKNOWN_ERROR = "Lỗi không xác định khi xử lý file.".freeze
 
-    def initialize(llm:, embedder:, store:, extractor: Rag::Extract)
+    def initialize(llm:, embedder:, store:, extractor: Rag::Extract, chunking: Rag::CHUNKING)
       @restructurer = Restructurer.new(llm: llm)
       @embedder = embedder
       @store = store
       @extractor = extractor
+      @chunking = chunking
     end
 
-    def call(path)
-      report = Report.new([], [], [])
-      files = files_for(path, report)
-      files.each { |f| ingest_file(f, report) }
+    # metadata: a Meta for a single file, or { nfc basename => Meta }.
+    def call(path, metadata)
+      report = Report.new([], [], [], nil, [])
+      files_for(path, report).each { |f| ingest_file(f, metadata, report) }
       report
+    end
+
+    def prepare(path, meta, filename: nil)
+      name = Text.nfc(filename || File.basename(path))
+      raise Error, "Chỉ nhận file .pdf và .docx." unless EXTENSIONS.include?(File.extname(name).downcase)
+      sha = Digest::SHA256.file(path).hexdigest
+      existing = @store.find_document(tenant_id: meta.tenant_id, title: meta.title, version: meta.version)
+      return Prepared.new(existing.id, true, name) if existing && existing.sha256 == sha && existing.status == "done"
+      id = @store.start_document(**meta.to_h, filename: name, path: path, sha256: sha)
+      Prepared.new(id, false, name)
+    end
+
+    # Returns nil on success, or the failure message (also recorded on the document).
+    def run(id, path)
+      pages, chunks = process(path)
+      @store.finish_document(id, pages: pages, chunks: chunks)
+      nil
+    rescue StandardError => e
+      message = e.is_a?(Error) ? e.message : UNKNOWN_ERROR
+      warn "ingest #{File.basename(path)}: #{e.class}: #{e.message}" unless e.is_a?(Error)
+      record_failure(id, message)
+      message
     end
 
     private
@@ -41,27 +67,20 @@ module Rag
       files.map { |n| File.join(path, n) }
     end
 
-    def ingest_file(path, report)
+    def ingest_file(path, metadata, report)
       name = Text.nfc(File.basename(path))
-      id = nil
+      meta = metadata.is_a?(Hash) ? metadata[name] : metadata
+      return report.no_metadata << name unless meta
       begin
-        raise Error, "Chỉ nhận file .pdf và .docx." unless EXTENSIONS.include?(File.extname(name).downcase)
-        sha = Digest::SHA256.file(path).hexdigest
-        # TEMP (Tasks 3 and 6): metadata derived from the file until real metadata is passed in.
-        meta = { tenant_id: DEFAULT_TENANT, title: File.basename(name, ".*"), version: 1,
-                 valid_from: Date.new(1970, 1, 1), valid_to: Date.new(9999, 12, 31) }
-        existing = @store.find_document(**meta.slice(:tenant_id, :title, :version))
-        return report.skipped << name if existing && existing.sha256 == sha && existing.status == "done"
-        id = @store.start_document(**meta, filename: name, path: path, sha256: sha)
-        pages, chunks = process(path)
-        @store.finish_document(id, pages: pages, chunks: chunks)
-        report.ok << name
+        prep = prepare(path, meta)
       rescue StandardError => e
         message = e.is_a?(Error) ? e.message : UNKNOWN_ERROR
         warn "ingest #{name}: #{e.class}: #{e.message}" unless e.is_a?(Error)
-        record_failure(id, message)
-        report.failed << [name, message]
+        return report.failed << [name, message]
       end
+      return report.skipped << name if prep.skipped
+      message = run(prep.id, path)
+      message ? report.failed << [name, message] : report.ok << name
     end
 
     def process(path)
