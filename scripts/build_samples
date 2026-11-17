@@ -4,7 +4,7 @@ require "open3"
 require "yaml"
 require "fileutils"
 require "tmpdir"
-$LOAD_PATH.unshift("lib")
+$LOAD_PATH.unshift("src")
 require "rag"
 
 LO = ["soffice", "--headless", "-env:UserInstallation=file:///tmp/lo-profile"].freeze

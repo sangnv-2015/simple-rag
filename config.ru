@@ -1,4 +1,4 @@
-require_relative "lib/rag"
+require_relative "src/rag"
 require_relative "web/app"
 require_relative "web/worker"
 

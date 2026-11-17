@@ -1,5 +1,5 @@
 #!/usr/bin/env ruby
 files = ARGV.empty? ? Dir["tests/**/*_test.rb"] : ARGV
-$LOAD_PATH.unshift("lib", "tests")
+$LOAD_PATH.unshift("src", "tests")
 files.each { |f| require File.expand_path(f) }
 require "minitest/autorun"
