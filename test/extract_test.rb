@@ -49,6 +49,23 @@ class ExtractTest < Minitest::Test
     end
   end
 
+  def test_pdftotext_is_bounded_by_the_page_cap
+    st = Struct.new(:success?, :exitstatus).new(true, 0)
+    seen = nil
+    real = Open3.method(:capture3)
+    Open3.define_singleton_method(:capture3) { |*cmd| seen = cmd; ["", "", st] }
+    begin
+      Dir.mktmpdir do |d|
+        path = File.join(d, "x.pdf")
+        File.write(path, "x")
+        Rag::Extract.pages(path)
+      end
+    ensure
+      Open3.define_singleton_method(:capture3, real)
+    end
+    assert_equal (Rag::MAX_PAGES + 1).to_s, seen[seen.index("-l") + 1]
+  end
+
   def test_failed_command_logs_to_stderr_but_user_message_has_no_details
     Dir.mktmpdir do |d|
       path = File.join(d, "x.pdf")

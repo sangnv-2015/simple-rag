@@ -36,7 +36,7 @@ module Rag
     end
 
     def self.pdf_pages(path, name = File.basename(path))
-      out = run("timeout", "120", "pdftotext", "-layout", path, "-", name: name)
+      out = run("timeout", "120", "pdftotext", "-layout", "-l", (MAX_PAGES + 1).to_s, path, "-", name: name)
       split_pages(out.force_encoding("UTF-8").scrub(""))
     end
 

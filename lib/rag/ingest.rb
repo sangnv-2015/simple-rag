@@ -63,9 +63,14 @@ module Rag
 
     def process(path)
       pages = @extractor.pages(path)
+      raise Error, "Tài liệu quá dài (tối đa #{MAX_PAGES} trang)." if pages.size > MAX_PAGES
       readable = pages.select(&:readable)
       raise Error, "file scan, không đọc được" if readable.empty?
       readable.each do |page|
+        if page.raw_text.size > MAX_PAGE_CHARS # too big to send: keep the raw text
+          page.fallback = true
+          next
+        end
         r = @restructurer.call(page.raw_text)
         page.markdown = r.markdown
         page.fallback = r.fallback

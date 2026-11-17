@@ -6,6 +6,8 @@ module Rag
   TOP_K = 6
   MAX_UPLOAD_BYTES = 30 * 1024 * 1024
   MIN_QUOTE_CHARS = 10
+  MAX_PAGES = 200 # every readable page is one paid model call
+  MAX_PAGE_CHARS = 20_000
 
   class Error < StandardError; end
 

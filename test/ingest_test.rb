@@ -74,6 +74,34 @@ class IngestTest < Minitest::Test
     assert_includes report.summary, "Lỗi: bad.pdf — File hỏng"
   end
 
+  def test_too_many_pages_fails_before_any_llm_call
+    path = write("a.pdf")
+    pages = (1..Rag::MAX_PAGES + 1).map { |n| page(n) }
+    report = ingest("a.pdf" => pages).call(path)
+    assert_equal [["a.pdf", "Tài liệu quá dài (tối đa 200 trang)."]], report.failed
+    assert_empty @llm.calls
+    assert_equal "error", @store.find_document("a.pdf").status
+  end
+
+  def test_exactly_max_pages_is_accepted
+    path = write("a.pdf")
+    report = ingest("a.pdf" => (1..Rag::MAX_PAGES).map { |n| page(n, "Trang #{n} nội dung", readable: n == 1) }).call(path)
+    assert_equal ["a.pdf"], report.ok
+  end
+
+  def test_oversized_page_skips_the_llm_and_is_chunked_from_raw_text
+    path = write("a.pdf")
+    long = ("Điều khoản dài. " * 2000)[0, Rag::MAX_PAGE_CHARS + 1]
+    ingest("a.pdf" => [page(1, long), page(2)]).call(path)
+    assert_equal 1, @llm.calls.size # only page 2
+    stored = @store.pages("a.pdf")
+    assert_equal [true, false], stored.map(&:fallback)
+    assert_nil stored[0].markdown
+    texts = @store.search(@embedder.embed_query("điều khoản"), 100).select { |h| h.page == 1 }.map(&:text)
+    assert_operator texts.size, :>, 1
+    assert_equal Rag::Chunker.split(long), texts.sort_by { |t| Rag::Chunker.split(long).index(t) || 0 }
+  end
+
   def test_unreadable_page_is_marked_and_not_sent_to_llm
     path = write("a.pdf")
     pages = [page(1), page(2, "", readable: false), page(3)]
