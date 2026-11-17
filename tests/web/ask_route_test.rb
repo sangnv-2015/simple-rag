@@ -50,7 +50,7 @@ class AskRouteTest < Minitest::Test
   end
 
   def done_store
-    FakeStore.new.tap { |s| s.finish_document(s.start_document(filename: "a.pdf", sha256: "x"), pages: [], chunks: []) }
+    FakeStore.new.tap { |s| s.finish_document(s.start_document(**TestMeta.attrs("a.pdf", sha256: "x")), pages: [], chunks: []) }
   end
 
   def test_index_shows_title_link_and_guidance_when_no_documents

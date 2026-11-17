@@ -28,8 +28,8 @@ class IngestTest < Minitest::Test
     report = ingest("a.pdf" => [page(1), page(2)]).call(path)
     assert_equal ["a.pdf"], report.ok
     refute report.failed?
-    assert_equal "done", @store.find_document("a.pdf").status
-    hits = @store.search(@embedder.embed_query("nội dung"), 10)
+    assert_equal "done", by_name(@store, "a.pdf").status
+    hits = @store.search(@embedder.embed_query("nội dung"), 10, tenant_id: "nus")
     assert_equal 2, hits.size
     assert(hits.all? { |h| (1..2).cover?(h.page) })
     assert_equal 1, @embedder.inputs.size
@@ -53,7 +53,7 @@ class IngestTest < Minitest::Test
     File.write(path, "v2")
     ingest("a.pdf" => [page(1, "Bản mới 222")]).call(path)
     assert_equal 1, @store.documents.size
-    texts = @store.search(@embedder.embed_query("bản"), 10).map(&:text).join
+    texts = @store.search(@embedder.embed_query("bản"), 10, tenant_id: "nus").map(&:text).join
     assert_includes texts, "Bản mới 222"
     refute_includes texts, "Bản cũ"
   end
@@ -66,10 +66,10 @@ class IngestTest < Minitest::Test
     assert_equal [["bad.pdf", "File hỏng"]], report.failed
     assert_equal ["good.pdf"], report.ok
     assert report.failed?
-    doc = @store.find_document("bad.pdf")
+    doc = by_name(@store, "bad.pdf")
     assert_equal "error", doc.status
     assert_equal "File hỏng", doc.error
-    assert_empty @store.pages("bad.pdf")
+    assert_empty @store.pages(doc.id)
     assert_includes report.summary, "OK: good.pdf"
     assert_includes report.summary, "Lỗi: bad.pdf — File hỏng"
   end
@@ -80,7 +80,7 @@ class IngestTest < Minitest::Test
     report = ingest("a.pdf" => pages).call(path)
     assert_equal [["a.pdf", "Tài liệu quá dài (tối đa 200 trang)."]], report.failed
     assert_empty @llm.calls
-    assert_equal "error", @store.find_document("a.pdf").status
+    assert_equal "error", by_name(@store, "a.pdf").status
   end
 
   def test_exactly_max_pages_is_accepted
@@ -94,10 +94,10 @@ class IngestTest < Minitest::Test
     long = ("Điều khoản dài. " * 2000)[0, Rag::MAX_PAGE_CHARS + 1]
     ingest("a.pdf" => [page(1, long), page(2)]).call(path)
     assert_equal 1, @llm.calls.size # only page 2
-    stored = @store.pages("a.pdf")
+    stored = @store.pages(by_name(@store, "a.pdf").id)
     assert_equal [true, false], stored.map(&:fallback)
     assert_nil stored[0].markdown
-    texts = @store.search(@embedder.embed_query("điều khoản"), 100).select { |h| h.page == 1 }.map(&:text)
+    texts = @store.search(@embedder.embed_query("điều khoản"), 100, tenant_id: "nus").select { |h| h.page == 1 }.map(&:text)
     assert_operator texts.size, :>, 1
     assert_equal Rag::Chunker.split(long), texts.sort_by { |t| Rag::Chunker.split(long).index(t) || 0 }
   end
@@ -106,11 +106,11 @@ class IngestTest < Minitest::Test
     path = write("a.pdf")
     pages = [page(1), page(2, "", readable: false), page(3)]
     ingest("a.pdf" => pages).call(path)
-    stored = @store.pages("a.pdf")
+    stored = @store.pages(by_name(@store, "a.pdf").id)
     assert_equal [true, false, true], stored.map(&:readable)
     assert_nil stored[1].markdown
     assert_equal 2, @llm.calls.size
-    assert_equal [1, 3], @store.search(@embedder.embed_query("trang"), 10).map(&:page).sort
+    assert_equal [1, 3], @store.search(@embedder.embed_query("trang"), 10, tenant_id: "nus").map(&:page).sort
   end
 
   def test_file_with_only_unreadable_pages_fails_with_scan_message
@@ -125,10 +125,10 @@ class IngestTest < Minitest::Test
     store = FakeStore.new
     report = ingest({ "a.pdf" => [page(1, "Tổng 1.250.000 đồng")] }, store: store, llm: llm).call(path)
     assert_equal ["a.pdf"], report.ok
-    p = store.pages("a.pdf").first
+    p = store.pages(by_name(store, "a.pdf").id).first
     assert p.fallback
     assert_equal "# Tổng cộng", p.markdown
-    assert_includes store.search(@embedder.embed_query("tổng"), 5).first.text, "1.250.000"
+    assert_includes store.search(@embedder.embed_query("tổng"), 5, tenant_id: "nus").first.text, "1.250.000"
   end
 
   def test_error_status_with_same_hash_is_retried_not_skipped
@@ -137,7 +137,7 @@ class IngestTest < Minitest::Test
     report = ingest("a.pdf" => [page(1)]).call(path)
     assert_equal ["a.pdf"], report.ok
     assert_empty report.skipped
-    assert_equal "done", @store.find_document("a.pdf").status
+    assert_equal "done", by_name(@store, "a.pdf").status
   end
 
   def test_llm_error_midway_stores_no_pages_or_chunks
@@ -146,10 +146,10 @@ class IngestTest < Minitest::Test
     llm = FakeLLM.new { |m| (n += 1) == 2 ? Rag::DeepSeek::Error.new("DeepSeek bận") : "# ok 1" }
     report = ingest({ "a.pdf" => [page(1, "ok 1"), page(2, "ok 2")] }, llm: llm).call(path)
     assert_equal [["a.pdf", "DeepSeek bận"]], report.failed
-    doc = @store.find_document("a.pdf")
+    doc = by_name(@store, "a.pdf")
     assert_equal "error", doc.status
     assert_equal "DeepSeek bận", doc.error
-    assert_equal [], @store.pages("a.pdf")
+    assert_equal [], @store.pages(by_name(@store, "a.pdf").id)
     assert_equal 0, doc.chunk_count
   end
 
@@ -194,7 +194,7 @@ class IngestTest < Minitest::Test
     _, err = capture_io { report = ingest("a.pdf" => boom, "b.pdf" => [page(1)]).call(@dir) }
     assert_equal [["a.pdf", "Lỗi không xác định khi xử lý file."]], report.failed
     assert_equal ["b.pdf"], report.ok
-    assert_equal "Lỗi không xác định khi xử lý file.", @store.find_document("a.pdf").error
+    assert_equal "Lỗi không xác định khi xử lý file.", by_name(@store, "a.pdf").error
     assert_includes err, "RuntimeError"
     assert_includes err, "boom /secret/path"
     refute_includes report.summary, "secret"

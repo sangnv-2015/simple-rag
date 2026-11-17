@@ -45,7 +45,7 @@ class DocumentsRouteTest < Minitest::Test
   end
 
   def add(name, status: "done", error: nil, pages: [])
-    id = @store.start_document(filename: name, sha256: "x")
+    id = @store.start_document(**TestMeta.attrs(name, sha256: "x"))
     case status
     when "done" then @store.finish_document(id, pages: pages, chunks: [])
     when "error" then @store.fail_document(id, error)

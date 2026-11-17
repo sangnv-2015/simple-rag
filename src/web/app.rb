@@ -130,8 +130,9 @@ class Web < Sinatra::Base
     name = params[:splat].first.to_s.dup.force_encoding(Encoding::UTF_8).scrub("_")
     halt 404, "Không tìm thấy tài liệu." if name.include?("\0")
     @name = Rag::Text.nfc(name)
-    halt 404, "Không tìm thấy tài liệu." unless settings.store.find_document(@name)
-    @pages = settings.store.pages(@name)
+    doc = settings.store.documents.find { |d| d.filename == @name } # TEMP (Task 6): by filename until routes use ids
+    halt 404, "Không tìm thấy tài liệu." unless doc
+    @pages = settings.store.pages(doc.id)
     n = Integer(params[:page].to_s, exception: false)
     @current = n if n && @pages.any? { |p| p.number == n }
     @quote = params[:q].to_s.strip

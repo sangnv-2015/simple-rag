@@ -22,7 +22,7 @@ class AskTest < Minitest::Test
   end
 
   def add(file, page, text)
-    id = @store.start_document(filename: file, sha256: "h#{file}")
+    id = @store.start_document(**TestMeta.attrs(file, sha256: "h#{file}"))
     @store.finish_document(id, pages: [], chunks: [Rag::Chunk.new(page: page, position: 0, text: text, embedding: @embedder.embed_query(text))])
   end
 

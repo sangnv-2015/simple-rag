@@ -47,9 +47,12 @@ module Rag
       begin
         raise Error, "Chỉ nhận file .pdf và .docx." unless EXTENSIONS.include?(File.extname(name).downcase)
         sha = Digest::SHA256.file(path).hexdigest
-        existing = @store.find_document(name)
+        # TEMP (Tasks 3 and 6): metadata derived from the file until real metadata is passed in.
+        meta = { tenant_id: DEFAULT_TENANT, title: File.basename(name, ".*"), version: 1,
+                 valid_from: Date.new(1970, 1, 1), valid_to: Date.new(9999, 12, 31) }
+        existing = @store.find_document(**meta.slice(:tenant_id, :title, :version))
         return report.skipped << name if existing && existing.sha256 == sha && existing.status == "done"
-        id = @store.start_document(filename: name, sha256: sha)
+        id = @store.start_document(**meta, filename: name, path: path, sha256: sha)
         pages, chunks = process(path)
         @store.finish_document(id, pages: pages, chunks: chunks)
         report.ok << name

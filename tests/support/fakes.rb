@@ -57,3 +57,16 @@ class FakeExtractor
     r.map(&:dup)
   end
 end
+
+module TestMeta
+  def self.attrs(filename, **over)
+    { tenant_id: "nus", title: filename, version: 1, valid_from: Date.new(2000, 1, 1), valid_to: Date.new(2999, 12, 31),
+      filename: filename, path: "/x/#{filename}", sha256: "h" }.merge(over)
+  end
+
+  def by_name(store, filename) = store.documents.find { |d| d.filename == filename }
+  module_function :by_name
+end
+
+# Test files call by_name(...) unqualified.
+Minitest::Test.include(TestMeta) if defined?(Minitest::Test)
