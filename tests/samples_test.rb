@@ -86,6 +86,8 @@ class SamplesTest < Minitest::Test
       assert pages.(v2).any? { |t| t.include?(phrase) }, "v2 lacks #{phrase}"
       refute pages.(v1).any? { |t| t.include?(phrase) }, "v1 has #{phrase}"
     end
+    assert pages.(v2).any? { |t| t.include?("Phiên bản 2") }
+    assert pages.(v1).any? { |t| t.include?("Phiên bản 1") }
   end
 
   def test_tc_tags_cover_tc1_tc3_tc4_tc5_tc6_tc7_and_tenants_are_configured
@@ -94,5 +96,11 @@ class SamplesTest < Minitest::Test
     assert_equal ["travel-expense-policy.pdf"], QUESTIONS.find { |q| q[:tc].to_a.include?("TC6") }[:select]
     tenants = Rag::TENANT_SETTINGS.fetch("tenants")
     QUESTIONS.each { |q| assert_includes tenants, q.fetch(:tenant, "nus"), q[:question] }
+  end
+
+  def test_tc5_twin_phrases_are_absent_from_the_other_tenants_file
+    text = ->(f) { text_of(MANIFEST.find { |m| File.basename(m[:out]) == f }[:out]) }
+    refute_includes text.("acme-quy-dinh-lam-viec-tu-xa.docx"), "tối đa 2 ngày"
+    refute_includes text.("quy-dinh-lam-viec-tu-xa.docx"), "tối đa 4 ngày"
   end
 end
