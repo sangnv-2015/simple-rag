@@ -8,6 +8,6 @@
 - {question: "How long do I have to submit my expense claim after I get back from a trip?", file: "travel-expense-policy.pdf", contains: "within 30 days after the end of the trip", answerable: true, after_upload: false}
 - {question: "What is the hotel limit per night in a Tier 1 city?", file: "travel-expense-policy.pdf", contains: "USD 140", answerable: true, after_upload: false}
 - {question: "Do I need a receipt for a USD 40 taxi ride?", file: "travel-expense-policy.pdf", contains: "above USD 25", answerable: true, after_upload: false}
-- {question: "Mua hàng được 10 ngày rồi muốn trả thì được hoàn lại bao nhiêu phần trăm tiền?", file: "chinh-sach-hoan-tien.docx", contains: "70%", answerable: true, after_upload: true}
-- {question: "Công ty thưởng Tết bao nhiêu tháng lương?", file: null, contains: "", answerable: false, after_upload: false}
-- {question: "Does the company reimburse travel costs for an employee's spouse?", file: null, contains: "", answerable: false, after_upload: false}
+- {question: "Hàng về tay được 10 ngày rồi, giờ muốn trả thì được hoàn bao nhiêu phần trăm?", file: "chinh-sach-hoan-tien.docx", contains: "70%", answerable: true, after_upload: true}
+- {question: "Công ty thưởng Tết bao nhiêu tháng lương?", file: null, contains: "", answerable: false, after_upload: false, probe: ["thưởng", "tết", "tháng 13"]}
+- {question: "Does the company pay for employees' gym memberships?", file: null, contains: "", answerable: false, after_upload: false, probe: ["gym", "fitness", "wellness", "membership"]}

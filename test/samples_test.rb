@@ -29,11 +29,22 @@ class SamplesTest < Minitest::Test
     end
   end
 
-  def test_every_answerable_question_phrase_is_in_its_file
+  def test_every_answerable_question_phrase_is_on_one_page_of_its_file
     QUESTIONS.select { |q| q[:answerable] }.each do |q|
       path = MANIFEST.find { |m| File.basename(m[:out]) == q[:file] }&.fetch(:out)
       refute_nil path, q[:question]
-      assert text_of(path).include?(Rag::Text.squash(q[:contains]).unicode_normalize(:nfc)), "#{q[:question]} -> #{q[:contains]}"
+      phrase = Rag::Text.squash(q[:contains]).unicode_normalize(:nfc)
+      assert Rag::Extract.pages(path).any? { |pg| Rag::Text.squash(pg.raw_text).unicode_normalize(:nfc).include?(phrase) },
+             "#{q[:question]} -> #{q[:contains]}"
+    end
+  end
+
+  def test_unanswerable_probe_terms_are_absent_from_every_sample
+    all = MANIFEST.map { |m| text_of(m[:out]).downcase }.join(" ")
+    unanswerable = QUESTIONS.reject { |q| q[:answerable] }
+    unanswerable.each do |q|
+      refute_empty q[:probe].to_a, q[:question]
+      q[:probe].each { |t| refute all.include?(t.unicode_normalize(:nfc).downcase), "#{t} found (#{q[:question]})" }
     end
   end
 

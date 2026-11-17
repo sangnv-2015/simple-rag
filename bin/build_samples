@@ -3,28 +3,28 @@
 require "open3"
 require "yaml"
 require "fileutils"
+require "tmpdir"
 $LOAD_PATH.unshift("lib")
 require "rag"
 
 LO = ["soffice", "--headless", "-env:UserInstallation=file:///tmp/lo-profile"].freeze
-WORK = "tmp/build"
 
-def run(*cmd)
-  out, err, st = Open3.capture3("timeout", "120", *cmd)
-  abort "FAIL #{cmd[1]}: #{err[0, 300]}" unless st.success?
-  out
+# Converts into a fresh dir and aborts unless the expected file appears, so a stale file is never reused.
+def convert(src, format, dir, infilter: nil)
+  cmd = ["timeout", "120", *LO, *(infilter ? ["--infilter=#{infilter}"] : []), "--convert-to", format, "--outdir", dir, src]
+  out, err, st = Open3.capture3(*cmd)
+  produced = File.join(dir, "#{File.basename(src, '.*')}.#{format}")
+  abort "FAIL converting #{src} to #{format}: #{out[0, 300]} #{err[0, 300]}" unless st.success? && File.exist?(produced)
+  produced
 end
 
-FileUtils.mkdir_p(WORK)
 failed = false
 YAML.safe_load_file("samples/manifest.yml", symbolize_names: true).each do |m|
-  stem = File.basename(m[:src], ".html")
-  run(*LO, "--infilter=HTML (StarWriter)", "--convert-to", "docx", "--outdir", WORK, "samples/src/#{m[:src]}")
-  FileUtils.mkdir_p(File.dirname(m[:out]))
-  if File.extname(m[:out]) == ".pdf"
-    run(*LO, "--convert-to", "pdf", "--outdir", File.dirname(m[:out]), "#{WORK}/#{stem}.docx")
-  else
-    FileUtils.cp("#{WORK}/#{stem}.docx", m[:out])
+  Dir.mktmpdir("build-sample") do |dir|
+    built = convert("samples/src/#{m[:src]}", "docx", dir, infilter: "HTML (StarWriter)")
+    built = convert(built, "pdf", dir) if File.extname(m[:out]) == ".pdf"
+    FileUtils.mkdir_p(File.dirname(m[:out]))
+    FileUtils.mv(built, m[:out])
   end
   pages = Rag::Extract.pages(m[:out])
   ok = pages.size >= 3 && pages.all?(&:readable)
