@@ -29,7 +29,8 @@ class Web < Sinatra::Base
   MULTIPART_OVERHEAD = 1024 * 1024
   LOCAL_ORIGIN_HOSTS = ["localhost", "127.0.0.1", "[::1]"].freeze
 
-  # Runs before Rack parses (and spools) the body, so a huge or cross-site upload is refused unread.
+  # Puma (config/puma.rb) refuses a Content-Length over 32 MB itself; below that Puma has already read
+  # the body when this runs, so these checks stop the app from parsing a too-big or cross-site request.
   # Path-independent on purpose: Mustermann also matches percent-encoded paths (/%64ocuments).
   def call!(env)
     origin = env["HTTP_ORIGIN"]
