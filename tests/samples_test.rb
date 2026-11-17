@@ -56,4 +56,43 @@ class SamplesTest < Minitest::Test
     assert_equal 1, flagged.size
     assert_equal "chinh-sach-hoan-tien.docx", flagged.first[:file]
   end
+
+  def test_every_manifest_entry_has_valid_metadata
+    metas = Rag::Manifest.load
+    assert_equal MANIFEST.map { |m| Rag::Text.nfc(File.basename(m[:out])) }.sort, metas.keys.sort
+  end
+
+  def leave = MANIFEST.select { |m| m[:title] == "Quy chế nghỉ phép" }.sort_by { |m| m[:version] }
+
+  def test_nus_leave_policy_has_expired_v1_and_current_v2
+    v1, v2 = leave
+    assert_equal [1, 2], [v1[:version], v2[:version]]
+    assert_equal %w[nus nus], [v1[:tenant], v2[:tenant]]
+    assert_operator Date.parse(v1[:valid_to]), :<, Date.new(2026, 1, 1)
+    assert_includes Date.parse(v2[:valid_from])..Date.parse(v2[:valid_to]), Date.today
+  end
+
+  def test_acme_document_exists_with_a_nus_namesake_title
+    acme = MANIFEST.find { |m| m[:tenant] == "acme" }
+    refute_nil acme
+    assert MANIFEST.any? { |m| m[:tenant] == "nus" && m[:title] == acme[:title] }
+    assert_equal "acme-quy-dinh-lam-viec-tu-xa.docx", File.basename(acme[:out])
+  end
+
+  def test_v1_differs_from_v2_on_every_figure_the_questions_ask_about
+    v1, v2 = leave
+    pages = ->(m) { Rag::Extract.pages(m[:out]).map { |pg| Rag::Text.squash(pg.raw_text).unicode_normalize(:nfc) } }
+    ["tối đa 5 ngày", "16 ngày", "3 ngày làm việc", "9 giờ sáng"].each do |phrase|
+      assert pages.(v2).any? { |t| t.include?(phrase) }, "v2 lacks #{phrase}"
+      refute pages.(v1).any? { |t| t.include?(phrase) }, "v1 has #{phrase}"
+    end
+  end
+
+  def test_tc_tags_cover_tc1_tc3_tc4_tc5_tc6_tc7_and_tenants_are_configured
+    tags = QUESTIONS.flat_map { |q| q[:tc].to_a }
+    assert_empty %w[TC1 TC3 TC4 TC5 TC6 TC7] - tags
+    assert_equal ["travel-expense-policy.pdf"], QUESTIONS.find { |q| q[:tc].to_a.include?("TC6") }[:select]
+    tenants = Rag::TENANT_SETTINGS.fetch("tenants")
+    QUESTIONS.each { |q| assert_includes tenants, q.fetch(:tenant, "nus"), q[:question] }
+  end
 end

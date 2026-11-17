@@ -1,13 +1,15 @@
-- {question: "Ngày phép năm ngoái dùng không hết thì được giữ lại sang năm nay mấy ngày?", file: "quy-che-nghi-phep.pdf", contains: "tối đa 5 ngày", answerable: true, after_upload: false}
+- {question: "Ngày phép năm ngoái dùng không hết thì được giữ lại sang năm nay mấy ngày?", file: "quy-che-nghi-phep.pdf", contains: "tối đa 5 ngày", answerable: true, after_upload: false, tc: [TC1, TC2, TC4, TC7]}
 - {question: "Em làm ở công ty 12 năm rồi, một năm được nghỉ phép có lương mấy ngày?", file: "quy-che-nghi-phep.pdf", contains: "16 ngày", answerable: true, after_upload: false}
 - {question: "Tôi sắp lấy vợ thì được nghỉ có lương mấy ngày?", file: "quy-che-nghi-phep.pdf", contains: "3 ngày làm việc", answerable: true, after_upload: false}
 - {question: "Sáng nay tôi bị sốt, phải báo sếp chậm nhất mấy giờ?", file: "quy-che-nghi-phep.pdf", contains: "9 giờ sáng", answerable: true, after_upload: false}
 - {question: "Muốn ở nhà làm việc tuần sau thì phải chốt lịch muộn nhất lúc nào?", file: "quy-dinh-lam-viec-tu-xa.docx", contains: "17:00 thứ Sáu", answerable: true, after_upload: false}
-- {question: "Tiền mạng hàng tháng công ty hỗ trợ bao nhiêu khi làm việc ở nhà?", file: "quy-dinh-lam-viec-tu-xa.docx", contains: "300.000 đồng", answerable: true, after_upload: false}
+- {question: "Tiền mạng hàng tháng công ty hỗ trợ bao nhiêu khi làm việc ở nhà?", file: "quy-dinh-lam-viec-tu-xa.docx", contains: "300.000 đồng", answerable: true, after_upload: false, tc: [TC6], select: [travel-expense-policy.pdf]}
 - {question: "Laptop bị trộm khi đang làm ở nhà thì phải báo cho IT trong bao lâu?", file: "quy-dinh-lam-viec-tu-xa.docx", contains: "trong vòng 2 giờ", answerable: true, after_upload: false}
 - {question: "How long do I have to submit my expense claim after I get back from a trip?", file: "travel-expense-policy.pdf", contains: "within 30 days after the end of the trip", answerable: true, after_upload: false}
 - {question: "What is the hotel limit per night in a Tier 1 city?", file: "travel-expense-policy.pdf", contains: "USD 140", answerable: true, after_upload: false}
 - {question: "Do I need a receipt for a USD 40 taxi ride?", file: "travel-expense-policy.pdf", contains: "above USD 25", answerable: true, after_upload: false}
 - {question: "Hàng về tay được 10 ngày rồi, giờ muốn trả thì được hoàn bao nhiêu phần trăm?", file: "chinh-sach-hoan-tien.docx", contains: "70%", answerable: true, after_upload: true}
-- {question: "Công ty thưởng Tết bao nhiêu tháng lương?", file: null, contains: "", answerable: false, after_upload: false, probe: ["thưởng", "tết", "tháng 13"]}
+- {question: "Công ty thưởng Tết bao nhiêu tháng lương?", file: null, contains: "", answerable: false, after_upload: false, probe: ["thưởng", "tết", "tháng 13"], tc: [TC3]}
 - {question: "Does the company pay for employees' gym memberships?", file: null, contains: "", answerable: false, after_upload: false, probe: ["gym", "fitness", "wellness", "membership"]}
+- {question: "Một tuần được làm việc từ xa tối đa mấy ngày?", file: "quy-dinh-lam-viec-tu-xa.docx", contains: "tối đa 2 ngày", answerable: true, after_upload: false, tenant: nus, tc: [TC5]}
+- {question: "Một tuần được làm việc từ xa tối đa mấy ngày?", file: "acme-quy-dinh-lam-viec-tu-xa.docx", contains: "tối đa 4 ngày", answerable: true, after_upload: false, tenant: acme, tc: [TC5]}

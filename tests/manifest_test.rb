@@ -21,6 +21,6 @@ class ManifestTest < Minitest::Test
   end
 
   def test_real_manifest_loads
-    assert_equal 4, Rag::Manifest.load.size
+    assert_equal 6, Rag::Manifest.load.size
   end
 end
