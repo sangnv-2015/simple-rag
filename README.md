@@ -45,7 +45,7 @@ OK: quy-che-nghi-phep.pdf, quy-dinh-lam-viec-tu-xa.docx, travel-expense-policy.p
 Bỏ qua (không đổi): quy-che-nghi-phep.pdf, quy-dinh-lam-viec-tu-xa.docx, travel-expense-policy.pdf
 ```
 
-Chờ `up -d` khởi động xong rồi mới mở http://localhost:4567.
+Sau `up -d`, chờ vài giây cho đến khi `docker compose logs app` hiện dòng `* Listening on http://0.0.0.0:4567` (Puma đang lắng nghe), rồi mới mở http://localhost:4567.
 
 Sau buổi demo, dọn file đã tải lên bằng `rm -f documents/chinh-sach-hoan-tien.docx` (và `docker compose down -v` nếu muốn xóa cả dữ liệu).
 
@@ -94,7 +94,7 @@ docker compose run --rm app bin/build_samples        # tạo lại file mẫu t�
 ## 6. Xử lý sự cố
 
 - Trình duyệt báo 403: bạn đang vào bằng tên máy không phải `localhost`, `127.0.0.1` hay `[::1]`. Dùng `http://localhost:4567`.
-- Thiếu hoặc thiếu biến trong file `.env`: container web thoát ngay khi khởi động, thông báo tiếng Việt nằm trong `docker compose logs app`. Điền `DEEPSEEK_API_KEY` và `DEEPSEEK_API_BASE`.
+- Thiếu file `.env` hoặc thiếu biến trong file đó: container web thoát ngay khi khởi động, thông báo tiếng Việt nằm trong `docker compose logs app`. Điền `DEEPSEEK_API_KEY` và `DEEPSEEK_API_BASE`.
 - Sai key hoặc endpoint: trang chỉ hiện `Không thể trả lời lúc này. Vui lòng thử lại sau.`; lý do nằm trong `docker compose logs app`.
 - Sau khi sửa `.env`, chạy `docker compose up -d --force-recreate app` để container nhận giá trị mới.
 - File PDF scan: không có OCR, trang không có lớp chữ được báo là không đọc được; file chỉ toàn trang như vậy báo lỗi `file scan, không đọc được`.
