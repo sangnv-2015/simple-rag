@@ -94,7 +94,7 @@ Container chạy bằng người dùng thường (`app`, uid 1000) và mã ngu�
 docker run --rm -v "$PWD:/app" -w /app app bin/build_samples   # tạo lại file mẫu từ samples/src
 ```
 
-`bin/build_samples` là nguồn của `documents/` và `samples/upload-demo/`: không sửa tay các file đó. Tạo lại file mẫu làm đổi sha256, nên lần `bin/ingest` sau sẽ nạp lại (tốn lệnh gọi trả phí).
+`bin/build_samples` là nguồn của `documents/` và `samples/upload-demo/`: không sửa tay các file đó. Nếu file mẫu tạo lại khác byte so với bản đang nạp (sha256 đổi) thì lần `bin/ingest` sau sẽ nạp lại và tốn lệnh gọi trả phí.
 
 ## 6. Xử lý sự cố
 
