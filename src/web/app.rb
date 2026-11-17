@@ -15,8 +15,22 @@ class Web < Sinatra::Base
   # Views must wrap every dynamic value in h(...); ERB here does not escape on its own.
   def h(text) = Rack::Utils.escape_html(text.to_s)
 
+  # Escaped text with the quoted passage wrapped in <mark>.
+  def highlight(text, quote)
+    r = quote && Rag::Text.locate(text, quote)
+    return h(text) unless r
+    t = Rag::Text.nfc(text.to_s)
+    id = %( id="hit") unless @hit # first match is the scroll target of the link's #hit
+    @hit = true
+    "#{h t[0...r.begin]}<mark#{id}>#{h t[r]}</mark>#{h t[r.end..]}"
+  end
+
   set :views, File.expand_path("views", __dir__)
-  set :host_authorization, permitted_hosts: ["localhost", "127.0.0.1", "[::1]"]
+  # PUBLIC_HOST (comma-separated, e.g. an ngrok domain) is let in on top of localhost; unset = local only.
+  # Tolerates a pasted URL ("https://x.ngrok-free.app/"): Host headers carry the bare name only.
+  def self.public_hosts(raw) = raw.to_s.split(",").map { |h| h.strip.sub(%r{\A\w+://}, "").chomp("/") }.reject(&:empty?)
+  PUBLIC_HOSTS = public_hosts(ENV["PUBLIC_HOST"]).freeze
+  set :host_authorization, permitted_hosts: ["localhost", "127.0.0.1", "[::1]", *PUBLIC_HOSTS]
   use Rack::TempfileReaper
   set :show_exceptions, false
   set :ask, nil
@@ -27,14 +41,19 @@ class Web < Sinatra::Base
 
   TOO_LARGE = "File quá lớn (tối đa 30 MB).".freeze
   MULTIPART_OVERHEAD = 1024 * 1024
-  LOCAL_ORIGIN_HOSTS = ["localhost", "127.0.0.1", "[::1]"].freeze
+  MAX_ASK_BODY = 64 * 1024
+  HISTORY_TURNS = 3
+  HISTORY_Q_MAX = 1000
+  HISTORY_A_MAX = 2000
+  BAD_REQUEST = "Yêu cầu không hợp lệ.".freeze
+  ASK_TOO_LARGE = "Yêu cầu quá lớn.".freeze
 
   # Puma (config/puma.rb) refuses a Content-Length over 32 MB itself; below that Puma has already read
   # the body when this runs, so these checks stop the app from parsing a too-big or cross-site request.
   # Path-independent on purpose: Mustermann also matches percent-encoded paths (/%64ocuments).
   def call!(env)
     origin = env["HTTP_ORIGIN"]
-    # Every method: a cross-site GET /ask would spend paid model calls. Plain navigations send no Origin.
+    # Every method: a cross-site POST /ask would spend paid model calls. Plain navigations send no Origin.
     if origin && !local_origin?(origin)
       return [403, { "content-type" => "text/plain; charset=utf-8" }, ["Yêu cầu không hợp lệ."]]
     end
@@ -45,7 +64,7 @@ class Web < Sinatra::Base
   end
 
   def local_origin?(origin)
-    LOCAL_ORIGIN_HOSTS.include?(URI.parse(origin).host)
+    settings.host_authorization[:permitted_hosts].include?(URI.parse(origin).host)
   rescue URI::InvalidURIError
     false
   end
@@ -55,19 +74,25 @@ class Web < Sinatra::Base
     erb :ask
   end
 
-  get "/ask" do
-    q = params[:q].to_s
-    halt 400, "Thiếu câu hỏi." if q.strip.empty?
+  post "/ask" do
+    # Checked here, not in call!: that one must not trust path matching.
+    halt 413, ASK_TOO_LARGE if request.content_length.to_i > MAX_ASK_BODY
+    request.body.rewind if request.body.respond_to?(:rewind) # Rack 3: rack.input need not be rewindable
+    raw = request.body.read(MAX_ASK_BODY + 1).to_s # also caps chunked bodies without Content-Length
+    halt 413, ASK_TOO_LARGE if raw.bytesize > MAX_ASK_BODY
+    q, history = parse_ask(raw)
     content_type "text/event-stream"
     headers "Cache-Control" => "no-cache", "X-Accel-Buffering" => "no"
     stream do |out|
       send_event = ->(name, data) { out << "event: #{name}\ndata: #{JSON.generate(data)}\n\n" }
       begin
-        answer = settings.ask.call(q) { |d| send_event.call("delta", { text: d }) }
-        send_event.call("done", {
+        answer = settings.ask.call(q, history) { |d| send_event.call("delta", { text: d }) }
+        done = {
           found: answer.found, text: answer.found ? answer.text : "",
           sources: answer.sources.map { |s| { n: s.n, filename: s.filename, page: s.page, quote: s.quote, docx: s.filename.downcase.end_with?(".docx") } }
-        })
+        }
+        done[:standalone] = answer.standalone if answer.standalone && Rag::Text.squash(answer.standalone) != Rag::Text.squash(q)
+        send_event.call("done", done)
       rescue StandardError => e
         unless Web.client_gone?(e)
           warn "ask failed: #{e.class}"
@@ -109,10 +134,27 @@ class Web < Sinatra::Base
     @pages = settings.store.pages(@name)
     n = Integer(params[:page].to_s, exception: false)
     @current = n if n && @pages.any? { |p| p.number == n }
+    @quote = params[:q].to_s.strip
+    @quote = nil if @quote.empty? || !@current
     erb :document
   end
 
   private
+
+  # -> [question, history] with history as at most 3 {q:, a:} Symbol-key hashes, or halts 400.
+  def parse_ask(raw)
+    data = begin
+      JSON.parse(raw)
+    rescue JSON::ParserError
+      halt 400, BAD_REQUEST
+    end
+    halt 400, BAD_REQUEST unless data.is_a?(Hash)
+    q, history = data["q"], data.fetch("history", [])
+    halt 400, BAD_REQUEST unless q.is_a?(String) && q.valid_encoding? && !q.strip.empty?
+    halt 400, BAD_REQUEST unless history.is_a?(Array) &&
+                                 history.all? { |t| t.is_a?(Hash) && [t["q"], t["a"]].all? { |v| v.is_a?(String) && v.valid_encoding? } }
+    [q, history.last(HISTORY_TURNS).map { |t| { q: t["q"][0, HISTORY_Q_MAX], a: t["a"][0, HISTORY_A_MAX] } }]
+  end
 
   # Rows: stored documents plus names queued before ingest has created their record.
   def list_page(message = nil)

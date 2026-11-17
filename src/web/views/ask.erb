@@ -1,57 +1,289 @@
+<div class="app">
+  <aside class="sidebar" aria-label="Hội thoại">
+    <button type="button" id="new-chat" class="btn-new"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Cuộc trò chuyện mới</button>
+    <details id="sidebar" open>
+      <summary>Gần đây</summary>
+      <ul id="sidebar-list"></ul>
+    </details>
+  </aside>
+  <section class="chat-main">
 <% if @empty %>
-<p class="note">Chưa có tài liệu nào. Chạy lệnh nạp (docker compose run --rm app scripts/ingest) hoặc tải file lên ở trang Tài liệu.</p>
+    <p class="note">Chưa có tài liệu nào. Chạy lệnh nạp (docker compose run --rm app scripts/ingest) hoặc tải file lên ở trang Tài liệu.</p>
 <% end %>
-<form id="form">
-  <label for="q">Câu hỏi</label>
-  <input type="text" id="q" name="q" autocomplete="off" required autofocus>
-  <button type="submit" id="go">Hỏi</button>
-</form>
-<div id="answer" aria-live="polite"></div>
-<ul id="sources"></ul>
+    <div id="chat"></div>
+    <div class="welcome">
+      <span class="brand-mark" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+      <h2>Bạn muốn tìm gì trong tài liệu?</h2>
+      <p>Hỏi bằng tiếng Việt hoặc tiếng Anh. Mỗi câu trả lời kèm trích dẫn nguồn và số trang để bạn kiểm tra lại.</p>
+    </div>
+    <form id="form" class="composer">
+      <label for="q" class="sr-only">Câu hỏi</label>
+      <div class="composer-inner">
+        <input type="text" id="q" name="q" autocomplete="off" required autofocus placeholder="Nhập câu hỏi…">
+        <button type="submit" id="go">Hỏi</button>
+      </div>
+      <p class="hint">Câu trả lời chỉ dựa trên tài liệu đã nạp. Hãy mở nguồn để đối chiếu.</p>
+    </form>
+  </section>
+</div>
 <script>
 (function () {
   var form = document.getElementById("form"), input = document.getElementById("q"),
-      go = document.getElementById("go"), answer = document.getElementById("answer"),
-      list = document.getElementById("sources"), es = null;
+      go = document.getElementById("go"), chat = document.getElementById("chat"),
+      newChat = document.getElementById("new-chat"), list = document.getElementById("sidebar-list");
   var NOT_FOUND = "Không tìm thấy thông tin này trong tài liệu.";
-  var show = function (t) { answer.textContent = t.replace(/\[S(\d+)\]/g, "[$1]"); };
+  var ERROR_TEXT = "Không thể trả lời lúc này. Vui lòng thử lại sau.";
+  var current = { id: null, turns: [] }, ctrl = null;
 
-  function finish() { if (es) es.close(); es = null; go.disabled = false; }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
 
-  function addSource(s) {
-    var li = document.createElement("li"), a = document.createElement("a");
-    a.href = "/documents/" + encodeURIComponent(s.filename) + "?page=" + encodeURIComponent(s.page) + "#page-" + encodeURIComponent(s.page);
-    a.textContent = "[" + s.n + "] " + s.filename + " · trang " + s.page + (s.docx ? " (bản PDF)" : "");
+  // **bold** and [S<n>] citations; everything else stays plain text (model output is never parsed as HTML).
+  function inline(parent, s, idx) {
+    s.split(/(\*\*[^*]+\*\*|\[S\d+\])/).forEach(function (part) {
+      var m;
+      if (!part) return;
+      if ((m = part.match(/^\*\*(.+)\*\*$/))) parent.appendChild(el("strong", null, m[1]));
+      else if ((m = part.match(/^\[S(\d+)\]$/))) {
+        var a = el("a", "cite", m[1]);
+        a.href = "#src-" + idx + "-" + m[1];
+        parent.appendChild(a);
+      } else parent.appendChild(document.createTextNode(part));
+    });
+  }
+
+  // shortcut: line-based markdown subset (paragraphs, headings, lists, pipe tables); nested lists render flat.
+  function render(answer, text, idx) {
+    answer.textContent = "";
+    var block = null, kind = null;
+    text.split("\n").forEach(function (line) {
+      var t = line.trim(), m;
+      if (!t) { block = kind = null; return; }
+      if (/^\|[\s:\-|]+\|$/.test(t) && t.indexOf("-") >= 0) return; // table rule row
+      if (t[0] === "|") {
+        if (kind !== "table") { block = answer.appendChild(el("table")); kind = "table"; }
+        var tr = block.appendChild(el("tr"));
+        t.replace(/^\||\|$/g, "").split("|").forEach(function (c) { inline(tr.appendChild(el("td")), c.trim(), idx); });
+      } else if ((m = t.match(/^#{1,6}\s+(.*)/))) {
+        inline(answer.appendChild(el("h4")), m[1], idx); block = kind = null;
+      } else if ((m = t.match(/^(?:[-*•]|(\d+)[.)])\s+(.*)/))) {
+        var k = m[1] ? "ol" : "ul";
+        if (kind !== k) { block = answer.appendChild(el(k)); kind = k; }
+        inline(block.appendChild(el("li")), m[2], idx);
+      } else {
+        if (kind !== "p") { block = answer.appendChild(el("p")); kind = "p"; }
+        else block.appendChild(el("br"));
+        inline(block, t, idx);
+      }
+    });
+  }
+
+  function addSource(list, s, idx) {
+    var li = el("li", "source"), a = el("a");
+    li.id = "src-" + idx + "-" + s.n;
+    // shortcut: only the first 40 words go in the link to stay under URL limits; the highlight then covers that prefix.
+    var q = s.quote ? "&q=" + encodeURIComponent(s.quote.split(" ").slice(0, 40).join(" ")) : "";
+    a.href = "/documents/" + encodeURIComponent(s.filename) + "?page=" + encodeURIComponent(s.page) + q + (q ? "#hit" : "#page-" + encodeURIComponent(s.page));
+    a.appendChild(el("span", "cite", String(s.n)));
+    a.appendChild(document.createTextNode(" " + s.filename));
     li.appendChild(a);
-    var q = document.createElement("span");
-    q.className = "quote";
-    q.textContent = s.quote ? "“" + s.quote + "”" : "không xác minh được đoạn trích";
-    li.appendChild(q);
+    li.appendChild(el("span", "meta", " · trang " + s.page + (s.docx ? " (bản PDF)" : "")));
+    li.appendChild(s.quote ? el("blockquote", null, s.quote) : el("p", "meta", "Không xác minh được đoạn trích"));
     list.appendChild(li);
+  }
+
+  function scrollDown() { chat.scrollTop = chat.scrollHeight; }
+
+  // Empty turn block appended to #chat; fillTurn() puts content into it.
+  function buildTurn(q) {
+    var root = el("div", "turn"), t = {
+      root: root, meta: el("p", "meta"), ans: el("div", "answer"),
+      title: el("h3", null, "Nguồn"), list: el("ol", "sources")
+    };
+    root.appendChild(el("p", "question", q));
+    t.meta.hidden = t.title.hidden = true;
+    [t.meta, t.ans, t.title, t.list].forEach(function (n) { root.appendChild(n); });
+    chat.appendChild(root);
+    return t;
+  }
+
+  function message(t, msg) { t.ans.textContent = ""; t.ans.appendChild(el("p", "meta", msg)); }
+
+  function fillTurn(t, turn, idx) {
+    if (turn.standalone) { t.meta.textContent = "Hiểu là: " + turn.standalone; t.meta.hidden = false; }
+    if (turn.found) render(t.ans, turn.a, idx); else message(t, NOT_FOUND);
+    t.list.textContent = "";
+    (turn.found ? turn.sources || [] : []).forEach(function (s) { addSource(t.list, s, idx); });
+    t.title.hidden = !t.list.children.length;
+  }
+
+  function renderTurn(turn, index) {
+    var t = buildTurn(turn.q);
+    fillTurn(t, turn, index);
+    scrollDown();
+    return t;
+  }
+
+  var KEY = "rag.chats", MAX_CHATS = 50;
+
+  function loadChats() {
+    try {
+      var a = JSON.parse(localStorage.getItem(KEY));
+      if (!Array.isArray(a)) return [];
+      return a.filter(function (c) {
+        return c && typeof c === "object" && typeof c.id === "string" && typeof c.title === "string" && Array.isArray(c.turns) &&
+          c.turns.every(function (t) {
+            return t && typeof t === "object" && typeof t.q === "string" && typeof t.found === "boolean" && Array.isArray(t.sources) && (!t.found || typeof t.a === "string");
+          });
+      }).map(function (c) { c.updatedAt = Number(c.updatedAt) || 0; return c; }); // a conversation with any bad turn is dropped whole
+    } catch (e) { return []; }
+  }
+
+  function oldestFirst(chats) { return chats.sort(function (a, b) { return (a.updatedAt || 0) - (b.updatedAt || 0); }); }
+
+  function saveChats(chats) {
+    try {
+      chats = oldestFirst(chats.slice());
+      while (chats.length > MAX_CHATS) chats.shift();
+      for (;;) {
+        try { localStorage.setItem(KEY, JSON.stringify(chats)); return; }
+        catch (e) {
+          if (!e || e.name !== "QuotaExceededError" || chats.length <= 1) return; // never fall back to writing an empty list
+          chats.shift();
+        }
+      }
+    } catch (e) { /* storage unusable: the page keeps working without persistence */ }
+  }
+
+  function onTurnDone(turn) {
+    var chats = loadChats(), c = chats.filter(function (x) { return x.id === current.id; })[0];
+    if (!c) {
+      c = { id: current.id, title: turn.q.slice(0, 60), updatedAt: 0, turns: [] };
+      chats.push(c);
+    }
+    c.turns.push(turn);
+    c.updatedAt = Date.now();
+    saveChats(chats);
+    renderSidebar();
+  }
+
+  function renderSidebar() {
+    list.textContent = "";
+    loadChats().sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); }).forEach(function (c) {
+      var li = el("li"), open = el("button", "chat-item", c.title), del = el("button", "chat-del", "×");
+      open.type = del.type = "button";
+      open.title = c.title;
+      if (c.id === current.id) { open.classList.add("active"); open.setAttribute("aria-current", "true"); }
+      del.setAttribute("aria-label", "Xoá");
+      open.addEventListener("click", function () { openChat(c.id); });
+      del.addEventListener("click", function () { deleteChat(c.id); });
+      li.appendChild(open);
+      li.appendChild(del);
+      list.appendChild(li);
+    });
+  }
+
+  function openChat(id) {
+    var c = loadChats().filter(function (x) { return x.id === id; })[0];
+    if (!c) return renderSidebar();
+    if (ctrl) ctrl.abort();
+    ctrl = null;
+    current = { id: c.id, turns: c.turns.slice() };
+    chat.textContent = "";
+    unlock();
+    renderSidebar();
+    current.turns.forEach(function (turn, i) { renderTurn(turn, i); });
+    scrollDown();
+  }
+
+  function deleteChat(id) {
+    saveChats(loadChats().filter(function (x) { return x.id !== id; }));
+    if (id === current.id) startNewChat(); else renderSidebar();
+  }
+
+  function startNewChat() {
+    if (ctrl) ctrl.abort();
+    ctrl = null;
+    current = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), turns: [] };
+    chat.textContent = "";
+    unlock();
+    renderSidebar();
+  }
+
+  function unlock() { input.disabled = go.disabled = false; input.focus(); }
+
+  function sendQuestion(q) {
+    if (ctrl) ctrl.abort(); // never leave an orphan pending turn
+    var idx = current.turns.length, conv = current, mine = ctrl = new AbortController(), t = buildTurn(q), acc = "", done = null, failed = false;
+    var history = conv.turns.slice(-3).map(function (x) { return { q: x.q.slice(0, 1000), a: (x.found ? x.a : NOT_FOUND).slice(0, 2000) }; });
+    input.disabled = go.disabled = true;
+    t.ans.setAttribute("aria-live", "polite");
+    message(t, "Đang tìm câu trả lời…"); // replaced by the first delta, or by done/error
+    scrollDown();
+
+    function handle(name, data) {
+      if (name === "delta") { acc += data.text; render(t.ans, acc, idx); scrollDown(); }
+      else if (name === "done") done = data;
+      else if (name === "error") failed = true;
+    }
+
+    fetch("/ask", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ q: q, history: history }), signal: mine.signal })
+      .then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        var reader = res.body.getReader(), dec = new TextDecoder(), buf = "";
+        function pump() {
+          return reader.read().then(function (r) {
+            buf += dec.decode(r.value || new Uint8Array(), { stream: !r.done });
+            var blocks = buf.split("\n\n");
+            buf = r.done ? "" : blocks.pop();
+            blocks.forEach(function (blk) {
+              var name = "", data = "";
+              blk.split("\n").forEach(function (l) {
+                if (l.indexOf("event:") === 0) name = l.slice(6).trim();
+                else if (l.indexOf("data:") === 0) data += l.slice(5).trim();
+              });
+              if (name && data) handle(name, JSON.parse(data));
+            });
+            if (!r.done) return pump();
+          });
+        }
+        return pump();
+      })
+      .then(function () {
+        if (mine !== ctrl) return; // aborted by New chat
+        if (failed || !done) throw new Error("no done");
+        var turn = { q: q, a: done.found ? done.text : "", found: !!done.found, sources: done.sources || [], standalone: done.standalone };
+        fillTurn(t, turn, idx);
+        conv.turns.push(turn);
+        try { onTurnDone(turn); } catch (e) { /* persistence must not turn a good answer into an error */ }
+      })
+      .catch(function () {
+        if (mine !== ctrl) return;
+        message(t, ERROR_TEXT);
+        if (!input.value) input.value = q; // let the user retry without retyping
+      })
+      .then(function () {
+        if (mine !== ctrl) return;
+        ctrl = null;
+        t.ans.removeAttribute("aria-live");
+        unlock();
+        scrollDown();
+      });
   }
 
   form.addEventListener("submit", function (ev) {
     ev.preventDefault();
-    var question = input.value.trim();
-    if (!question || go.disabled) return;
-    if (es) es.close();
-    go.disabled = true;
-    answer.textContent = "Đang tìm câu trả lời…"; // replaced by the first delta, or by done/error
-    list.textContent = "";
-    var acc = "";
-    es = new EventSource("/ask?q=" + encodeURIComponent(question));
-    es.addEventListener("delta", function (e) { acc += JSON.parse(e.data).text; show(acc); });
-    es.addEventListener("done", function (e) {
-      var d = JSON.parse(e.data);
-      if (d.found) { show(d.text); d.sources.forEach(addSource); } else { answer.textContent = NOT_FOUND; }
-      finish();
-    });
-    // Server "error" events carry data; a dropped connection fires the same name without data.
-    es.addEventListener("error", function (e) {
-      answer.textContent = e.data ? JSON.parse(e.data).message : "Không thể trả lời lúc này. Vui lòng thử lại sau.";
-      list.textContent = "";
-      finish();
-    });
+    var q = input.value.trim();
+    if (!q || go.disabled) return;
+    input.value = "";
+    sendQuestion(q);
   });
+  newChat.addEventListener("click", startNewChat);
+  if (window.matchMedia && matchMedia("(max-width: 48rem)").matches) document.getElementById("sidebar").open = false;
+  startNewChat();
 })();
 </script>

@@ -1,6 +1,6 @@
 module Rag
   Source = Struct.new(:n, :filename, :page, :quote)
-  Answer = Struct.new(:text, :found, :sources)
+  Answer = Struct.new(:text, :found, :sources, :standalone)
 
   class Ask
     QUOTES_MARKER = "\n<<QUOTES>>\n"
@@ -51,34 +51,42 @@ module Rag
       @llm, @retriever = llm, Retriever.new(embedder: embedder, store: store, k: k)
     end
 
-    def call(question, &on_delta)
+    def call(question, history = [], &on_delta)
       return Answer.new("", false, []) if Text.squash(question).empty?
-      hits = @retriever.call(question)
-      return Answer.new("", false, []) if hits.empty?
+      standalone = history.empty? ? question : rewrite(history, question)
+      hits = @retriever.call(standalone)
+      return Answer.new("", false, [], standalone) if hits.empty?
       filter = on_delta && Filter.new(on_delta)
-      reply = @llm.chat([{ role: "user", content: Prompts.answer(question, hits) }], &filter&.method(:push))
+      reply = @llm.chat([{ role: "user", content: Prompts.answer(standalone, hits) }], &filter&.method(:push))
       filter&.finish
-      parse(reply, hits)
+      parse(reply, hits, standalone)
     end
 
     private
 
-    def parse(reply, hits)
+    def rewrite(history, question)
+      standalone = Text.squash(@llm.chat([{ role: "user", content: Prompts.rewrite(history, question) }]))
+      standalone.empty? ? question : standalone
+    end
+
+    def parse(reply, hits, standalone)
       text, quotes = reply.split(TOKEN, 2)
       text = (text || "").then { |t| quotes ? t.rstrip : t }
-      return Answer.new(text, false, []) if text.include?(NOT_FOUND)
+      return Answer.new(text, false, [], standalone) if text.include?(NOT_FOUND)
       cited = text.scan(/\[S(\d+)\]/).flatten.map(&:to_i).uniq.select { |n| n.between?(1, hits.size) }
       quoted = {}
-      quotes.to_s.each_line do |line|
-        next unless (m = line.strip.match(/\A\[S(\d+)\]\s*(.+)\z/))
-        quoted[m[1].to_i] ||= m[2].strip.sub(/\A(["“])(.*)(["”])\z/m, '\2')
+      # A quote may span several lines (table rows), so an entry runs until the next line starting with [S<n>].
+      quotes.to_s.split(/^(?=[ \t]*\[S\d+\])/).each do |entry|
+        next unless (m = entry.strip.match(/\A\[S(\d+)\]\s*(.+)\z/m))
+        body = m[2].sub(/(?:\s*(?:```\w*|\[\/S\d+\]))+\z/, "").strip # drop a closing [/S<n>] or code fence
+        quoted[m[1].to_i] ||= body.sub(/\A(["“])(.*)(["”])\z/m, '\2')
       end
       sources = cited.map do |n|
-        q = quoted[n] && Text.squash(quoted[n])
-        ok = q && q.size >= Rag::MIN_QUOTE_CHARS && Text.squash(hits[n - 1].text).include?(q)
+        q = quoted[n] && Text.comparable(quoted[n])
+        ok = q && q.size >= Rag::MIN_QUOTE_CHARS && Text.comparable(hits[n - 1].text).include?(q)
         Source.new(n, hits[n - 1].filename, hits[n - 1].page, ok ? q : nil)
       end
-      Answer.new(text, !sources.empty?, sources)
+      Answer.new(text, !sources.empty?, sources, standalone)
     end
   end
 end

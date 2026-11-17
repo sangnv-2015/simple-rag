@@ -1,6 +1,8 @@
 <p><a href="/documents">Tài liệu</a> · <a href="/">Hỏi đáp</a></p>
 <h2><%= h @name %></h2>
 <% @pages.each do |pg| %>
+<% other = @current && pg.number != @current %>
+<% if other %><details><summary>Trang <%= h pg.number %></summary><% end %>
 <section class="page<%= " current" if pg.number == @current %>" id="page-<%= h pg.number %>">
   <h3>Trang <%= h pg.number %><%= " (bản PDF)" if @name.downcase.end_with?(".docx") %></h3>
 <% if !pg.readable %>
@@ -9,10 +11,12 @@
 <% if pg.fallback %>
   <p class="flag">Đã dùng chữ gốc vì markdown thiếu số liệu</p>
 <% end %>
+<% q = (@quote if pg.number == @current) %>
   <div class="cols">
-    <div><h4>Chữ gốc</h4><pre><%= h pg.raw_text %></pre></div>
-    <div><h4>Markdown (DeepSeek dựng lại)</h4><pre><%= h pg.markdown %></pre></div>
+    <div><h4>Chữ gốc</h4><pre><%= highlight pg.raw_text, q %></pre></div>
+    <div><h4>Markdown (DeepSeek dựng lại)</h4><pre><%= highlight pg.markdown, q %></pre></div>
   </div>
 <% end %>
 </section>
+<% if other %></details><% end %>
 <% end %>

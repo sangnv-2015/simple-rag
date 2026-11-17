@@ -6,15 +6,16 @@ require "rack/mock"
 require_relative "../../src/web/app"
 
 class FakeAsk
-  attr_reader :calls
+  attr_reader :calls, :histories
 
   # script: Proc(question, &on_delta) -> Answer; may raise.
   def initialize(&script)
-    @script, @calls = script, []
+    @script, @calls, @histories = script, [], []
   end
 
-  def call(question, &on_delta)
+  def call(question, history = [], &on_delta)
     @calls << question
+    @histories << history
     @script.call(question, &on_delta)
   end
 end
@@ -31,6 +32,13 @@ class AskRouteTest < Minitest::Test
     env = { "HTTP_HOST" => host }
     env["HTTP_ORIGIN"] = origin if origin
     Rack::MockRequest.new(app).get(path, env)
+  end
+
+  def post_ask(app, body, host: "localhost:4567", origin: nil)
+    env = { "HTTP_HOST" => host }
+    env["HTTP_ORIGIN"] = origin if origin
+    json = body.is_a?(String) ? body.dup : JSON.generate(body)
+    Rack::MockRequest.new(app).post("/ask", env.merge(input: json, "CONTENT_TYPE" => "application/json"))
   end
 
   def events(body)
@@ -55,6 +63,11 @@ class AskRouteTest < Minitest::Test
     assert_match(%r{<button[^>]*>Hỏi</button>}, res.body)
   end
 
+  def test_index_has_chat_hooks
+    body = get(app_with, "/").body
+    ['id="chat"', 'id="new-chat"', 'id="sidebar-list"'].each { |s| assert_includes body, s }
+  end
+
   def test_index_has_no_guidance_when_a_document_is_done
     res = get(app_with(store: done_store), "/")
     refute_includes res.body, "Chưa có tài liệu nào."
@@ -66,7 +79,7 @@ class AskRouteTest < Minitest::Test
       d.call("Xin "); d.call("chào [S1]")
       Rag::Answer.new("Xin chào [S1]", true, [src])
     end
-    res = get(app_with(ask: ask), "/ask?q=hello")
+    res = post_ask(app_with(ask: ask), { "q" => "hello" })
     assert_includes res.content_type, "text/event-stream"
     assert_equal "no-cache", res.headers["Cache-Control"]
     assert_equal "no", res.headers["X-Accel-Buffering"]
@@ -79,7 +92,7 @@ class AskRouteTest < Minitest::Test
 
   def test_not_found_after_streamed_text_still_reports_found_false
     ask = FakeAsk.new { |_q, &d| d.call("bịa"); Rag::Answer.new("bịa", false, []) }
-    ev = events(get(app_with(ask: ask), "/ask?q=x").body)
+    ev = events(post_ask(app_with(ask: ask), { "q" => "x" }).body)
     assert_equal %w[delta done], ev.map(&:first)
     assert_equal false, ev.last[1]["found"]
     assert_equal "", ev.last[1]["text"]
@@ -89,7 +102,7 @@ class AskRouteTest < Minitest::Test
   def test_multiline_answer_with_script_tag_is_one_data_line
     text = "dòng 1\n</script><b>x</b>"
     ask = FakeAsk.new { |_q, &d| d.call(text); Rag::Answer.new(text, true, [Rag::Source.new(2, "B.PDF", 1, nil)]) }
-    body = get(app_with(ask: ask), "/ask?q=x").body
+    body = post_ask(app_with(ask: ask), { "q" => "x" }).body
     blocks = body.split("\n\n")
     assert_equal 2, blocks.size
     blocks.each { |b| assert_equal 2, b.lines.size, "event must be exactly event: + one data: line" }
@@ -102,15 +115,14 @@ class AskRouteTest < Minitest::Test
   def test_blank_question_is_400_and_ask_not_called
     ask = FakeAsk.new { raise "must not be called" }
     app = app_with(ask: ask)
-    assert_equal 400, get(app, "/ask?q=%20%20").status
-    assert_equal 400, get(app, "/ask").status
+    [{ "q" => "  " }, {}, { "q" => 1 }].each { |b| assert_equal 400, post_ask(app, b).status }
     assert_empty ask.calls
   end
 
   def test_ask_error_gives_friendly_event_without_details
     [Rag::DeepSeek::Error.new("Không gọi được DeepSeek (HTTP 502)"), RuntimeError.new("boom")].each do |err|
       ask = FakeAsk.new { raise err }
-      body = capture_stderr { get(app_with(ask: ask), "/ask?q=x").body }.first
+      body = capture_stderr { post_ask(app_with(ask: ask), { "q" => "x" }).body }.first
       assert_equal [["error", { "message" => FRIENDLY }]], events(body)
       %w[boom RuntimeError HTTP\ 502 DeepSeek].each { |s| refute_includes body, s }
     end
@@ -118,7 +130,7 @@ class AskRouteTest < Minitest::Test
 
   def test_error_after_partial_deltas_still_ends_with_error_event
     ask = FakeAsk.new { |_q, &d| d.call("dở dang"); raise "boom" }
-    body, err = capture_stderr { get(app_with(ask: ask), "/ask?q=x").body }
+    body, err = capture_stderr { post_ask(app_with(ask: ask), { "q" => "x" }).body }
     assert_equal %w[delta error], events(body).map(&:first)
     assert_includes err, "RuntimeError"
     refute_includes err, "boom"
@@ -126,14 +138,14 @@ class AskRouteTest < Minitest::Test
 
   def test_closed_socket_is_swallowed_quietly
     ask = FakeAsk.new { |_q, &d| d.call("a"); raise Errno::EPIPE }
-    body, err = capture_stderr { get(app_with(ask: ask), "/ask?q=x").body }
+    body, err = capture_stderr { post_ask(app_with(ask: ask), { "q" => "x" }).body }
     assert_equal %w[delta], events(body).map(&:first)
     assert_empty err
   end
 
   def test_puma_connection_error_is_swallowed_quietly
     ask = FakeAsk.new { |_q, &d| d.call("a"); raise Puma::ConnectionError }
-    body, err = capture_stderr { get(app_with(ask: ask), "/ask?q=x").body }
+    body, err = capture_stderr { post_ask(app_with(ask: ask), { "q" => "x" }).body }
     assert_equal %w[delta], events(body).map(&:first)
     assert_empty err
   end
@@ -147,20 +159,119 @@ class AskRouteTest < Minitest::Test
   def test_foreign_host_is_forbidden
     app = app_with
     assert_equal 403, get(app, "/", host: "evil.example").status
-    assert_equal 403, get(app, "/ask?q=x", host: "evil.example").status
+    assert_equal 403, post_ask(app, { "q" => "x" }, host: "evil.example").status
     assert_equal 200, get(app, "/", host: "localhost:4567").status
     assert_equal 200, get(app, "/", host: "127.0.0.1:4567").status
+  end
+
+  def test_public_hosts_strips_scheme_and_slash
+    assert_equal ["a.example", "b.example"], Web.public_hosts(" https://a.example/ , b.example,")
+    assert_equal [], Web.public_hosts(nil)
+  end
+
+  def test_public_host_is_allowed_as_host_and_origin
+    app = app_with
+    app.set :host_authorization, permitted_hosts: ["localhost", "tunnel.example"]
+    assert_equal 200, get(app, "/", host: "tunnel.example").status
+    assert_equal 200, post_ask(app, { "q" => "x" }, host: "tunnel.example", origin: "https://tunnel.example").status
+    assert_equal 403, get(app, "/", host: "evil.example").status
+    assert_equal 403, get(app, "/", host: "tunnel.example", origin: "https://evil.example").status
   end
 
   def test_foreign_origin_is_forbidden_on_every_method_and_ask_not_called
     ask = FakeAsk.new { Rag::Answer.new("", false, []) }
     app = app_with(ask: ask)
-    assert_equal 403, get(app, "/ask?q=x", origin: "http://evil.example").status
+    assert_equal 403, post_ask(app, { "q" => "x" }, origin: "http://evil.example").status
     assert_equal 403, get(app, "/", origin: "http://evil.example").status
     assert_empty ask.calls
-    assert_equal 200, get(app, "/ask?q=x").status
+    assert_equal 200, post_ask(app, { "q" => "x" }).status
     assert_equal 200, get(app, "/", origin: "http://localhost:4567").status
     assert_equal ["x"], ask.calls
+  end
+
+  def test_get_ask_is_not_served
+    ask = FakeAsk.new { raise "must not be called" }
+    assert_equal 404, get(app_with(ask: ask), "/ask?q=x").status
+    assert_empty ask.calls
+  end
+
+  def test_done_event_carries_standalone_only_when_it_differs
+    [["Hoàn tiền trong bao lâu?", "Hoàn tiền trong bao lâu?"], ["còn hoàn tiền?", nil], [nil, nil]].each do |standalone, expected|
+      ask = FakeAsk.new { Rag::Answer.new("t", true, [], standalone) }
+      done = events(post_ask(app_with(ask: ask), { "q" => "còn hoàn tiền?" }).body).last[1]
+      if expected
+        assert_equal expected, done["standalone"]
+      else
+        refute done.key?("standalone")
+      end
+    end
+  end
+
+  def test_first_turn_standalone_equal_after_squash_is_omitted
+    q = "Hoàn  tiền\u00A0trong bao lâu?"
+    ask = FakeAsk.new { Rag::Answer.new("t", true, [], q) }
+    done = events(post_ask(app_with(ask: ask), { "q" => q }).body).last[1]
+    refute done.key?("standalone")
+  end
+
+  def test_bad_bodies_are_400_and_ask_not_called
+    ask = FakeAsk.new { raise "must not be called" }
+    app = app_with(ask: ask)
+    ["{not json", "[]", "\"str\"", "null",
+     { "q" => "x", "history" => nil }, { "q" => "x", "history" => {} }, { "q" => "x", "history" => ["s"] },
+     { "q" => "x", "history" => [{ "q" => "a" }] }, { "q" => "x", "history" => [{ "q" => 1, "a" => "b" }] },
+     { "q" => "x", "history" => [{ "q" => "a", "a" => nil }] },
+     "{\"q\":\"a\xff\"}".b, "{\"q\":\"x\",\"history\":[{\"q\":\"a\xff\",\"a\":\"b\"}]}".b,
+     "{\"q\":\"x\",\"history\":[{\"q\":\"a\",\"a\":\"b\xff\"}]}".b].each do |b|
+      res = post_ask(app, b)
+      assert_equal 400, res.status, b.inspect
+      refute_includes res.content_type.to_s, "text/event-stream"
+    end
+    assert_empty ask.calls
+  end
+
+  def test_missing_history_is_empty_array
+    ask = FakeAsk.new { Rag::Answer.new("", false, []) }
+    post_ask(app_with(ask: ask), { "q" => "x" })
+    assert_equal [[]], ask.histories
+  end
+
+  def test_history_keeps_last_three_turns_and_cuts_lengths_by_characters
+    turns = (1..4).map { |i| { "q" => "q#{i}", "a" => "a#{i}" } } + [{ "q" => "ế" * 1500, "a" => "ế" * 2500 }]
+    ask = FakeAsk.new { Rag::Answer.new("", false, []) }
+    post_ask(app_with(ask: ask), { "q" => "x", "history" => turns })
+    h = ask.histories.last
+    assert_equal 3, h.size
+    assert_equal [{ q: "q3", a: "a3" }, { q: "q4", a: "a4" }], h[0, 2]
+    assert_equal [:q, :a], h[2].keys
+    assert_equal 1000, h[2][:q].size
+    assert_equal 2000, h[2][:a].size
+    assert h[2][:q].valid_encoding? && h[2][:a].valid_encoding?
+  end
+
+  def test_ask_works_when_rack_input_is_not_rewindable
+    # Rack 3 does not require rack.input to respond to rewind; Rack::Lint's wrapper does not.
+    app = app_with(ask: FakeAsk.new { Rag::Answer.new("ok", true, []) })
+    ok = Rack::MockRequest.new(app).post("/ask", "HTTP_HOST" => "localhost:4567", "CONTENT_TYPE" => "application/json",
+                                                  input: JSON.generate("q" => "hi"), lint: true)
+    assert_equal 200, ok.status
+    blank = Rack::MockRequest.new(app).post("/ask", "HTTP_HOST" => "localhost:4567", "CONTENT_TYPE" => "application/json",
+                                                     input: JSON.generate("q" => " "), lint: true)
+    assert_equal 400, blank.status
+  end
+
+  def test_body_over_64kb_is_413_and_ask_not_called
+    ask = FakeAsk.new { Rag::Answer.new("", false, []) }
+    app = app_with(ask: ask)
+    body = ->(n) { pad = JSON.generate({ "q" => "" }).bytesize; JSON.generate({ "q" => "a" * (n - pad) }) }
+    assert_equal 413, post_ask(app, body.call(65_537)).status
+    assert_empty ask.calls
+    assert_equal 65_537, body.call(65_537).bytesize
+    assert_equal 200, post_ask(app, body.call(65_536)).status
+    assert_equal 1, ask.calls.size
+    env = { "HTTP_HOST" => "localhost:4567", "CONTENT_LENGTH" => "65537", input: +"{}", "CONTENT_TYPE" => "application/json" }
+    assert_equal 413, Rack::MockRequest.new(app).post("/ask", env).status
+    assert_equal 1, ask.calls.size
   end
 
   private

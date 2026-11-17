@@ -2,7 +2,9 @@
 
 Nạp file PDF và Word (.docx), rồi hỏi bằng tiếng Việt hoặc tiếng Anh. Mỗi câu trả lời hiện dần và kèm nguồn: tên file, số trang, đoạn trích. Đoạn trích được kiểm tra khớp từng chữ với đoạn đã nạp (với bảng và trang được DeepSeek dựng lại, đoạn đã nạp là markdown dựng lại, nên trích từ bảng có dấu `|`). Nếu tài liệu không có thông tin, app trả lời `Không tìm thấy thông tin này trong tài liệu.`
 
-Quyền riêng tư: nội dung tài liệu được gửi tới endpoint DeepSeek khi nạp và khi trả lời. Mô hình tạo vector chạy cục bộ. Web chỉ mở trên `localhost` (không có đăng nhập).
+Trang hỏi đáp là khung chat: hỏi tiếp trong cùng một cuộc trò chuyện được. `New chat` mở cuộc mới; các cuộc cũ được lưu trên trình duyệt (localStorage, tối đa 50 cuộc) và mở lại được từ thanh bên.
+
+Quyền riêng tư: nội dung tài liệu được gửi tới endpoint DeepSeek khi nạp và khi trả lời; câu hỏi và lịch sử hội thoại gửi kèm cũng được gửi tới đó. Server không lưu hội thoại. Mô hình tạo vector chạy cục bộ. Web chỉ mở trên `localhost` (không có đăng nhập).
 
 ## Cấu trúc thư mục
 
@@ -19,8 +21,8 @@ src/
   embeddings/      embedder
   vectordb/        store (Postgres + pgvector)
   retrieval/       retriever
-  prompts/         câu lệnh gửi mô hình (trả lời, dựng lại trang)
-  generation/      deepseek (client LLM), ask (trả lời, stream, kiểm tra trích dẫn)
+  prompts/         câu lệnh gửi mô hình (trả lời, dựng lại trang, viết lại câu hỏi nối tiếp)
+  generation/      deepseek (client LLM), ask (trả lời, viết lại câu hỏi, stream, kiểm tra trích dẫn)
   web/             app.rb, worker.rb, views/*.erb (Sinatra)
 evaluation/        questions.yml và check_retrieval (đo độ chính xác truy xuất)
 scripts/           ingest, ask, build_samples, test; spikes/ (thử nghiệm và RESULTS.md)
@@ -138,7 +140,8 @@ docker run --rm -v "$PWD:/app" -w /app app scripts/build_samples   # tạo lại
 
 - Không có đăng nhập; chỉ chạy trên `localhost`.
 - Không OCR: trang scan được báo là không đọc được.
-- Mỗi câu hỏi độc lập, không nhớ câu hỏi trước.
+- Hội thoại chỉ nằm trên trình duyệt; server không nhớ gì giữa các lần gọi. Server chỉ dùng 3 lượt gần nhất của hội thoại gửi kèm, mỗi câu hỏi cắt còn 1 000 ký tự và mỗi câu trả lời còn 2 000 ký tự.
+- Câu hỏi nối tiếp được viết lại thành câu độc lập bằng mô hình; nếu viết lại sai thì câu trả lời sai theo. Câu viết lại được hiện dưới dòng "Hiểu là:" để người dùng kiểm tra.
 - Nội dung tài liệu được gửi tới endpoint mô hình khi nạp và khi trả lời.
 - Kiểm tra số sau khi dựng lại bắt được số bị đổi hoặc bị mất, nhưng không bắt được hai số bị hoán đổi cho nhau, và không kiểm tra được trang không có số. Cách kiểm tra là xem trang hai cột.
 - Đoạn trích hiển thị đã được kiểm tra khớp từng chữ với đoạn được dẫn. Nguồn nào không xác minh được đoạn trích thì hiển thị `không xác minh được đoạn trích`.
@@ -156,11 +159,12 @@ Hai điểm vào, mỗi điểm nhận ba thành phần truyền từ ngoài:
 
 ```ruby
 report = Rag::Ingest.new(llm:, embedder:, store:).call(path)   # path là file hoặc thư mục
-answer = Rag::Ask.new(llm:, embedder:, store:).call(question) { |delta| ... }  # block là tùy chọn
+answer = Rag::Ask.new(llm:, embedder:, store:).call(question, history) { |delta| ... }  # history và block là tùy chọn; history là mảng {q:, a:}
 ```
 
 - `Rag::Report` có bốn thành phần: `ok`, `skipped`, `failed` (mảng `[tên file, thông báo]`), `empty_dir`; cùng `failed?` và `summary`. `Ingest` không báo lỗi bằng exception theo từng file mà ghi vào `failed`.
-- `Rag::Answer` có `text`, `found`, `sources`; mỗi `Rag::Source` có `n`, `filename`, `page`, `quote` (`nil` nếu không xác minh được). Khi `found` là false thì không có nguồn.
+- `Rag::Answer` có `text`, `found`, `sources`, `standalone` (câu hỏi đã dùng để truy xuất: câu đã viết lại, hoặc chính câu hỏi ở lượt đầu); mỗi `Rag::Source` có `n`, `filename`, `page`, `quote` (`nil` nếu không xác minh được). Khi `found` là false thì không có nguồn.
+- Từ lượt thứ hai có `history`, `Ask` gọi LLM thêm một lần (không stream) để viết lại câu hỏi nối tiếp thành câu độc lập, rồi truy xuất bằng câu đó. Mỗi câu hỏi nối tiếp vì vậy tốn hai lệnh gọi trả phí. Prompt trả lời không nhận lịch sử, nên câu hỏi về chính câu trả lời trước ("tóm tắt lại", "giải thích ý thứ 2") sẽ ra `Không tìm thấy thông tin này trong tài liệu.`, đúng theo thiết kế.
 - Phần trả lời được stream qua block; phần trích dẫn do mô hình in sau dấu `Rag::Ask::TOKEN` (`<<QUOTES>>`) bị lọc ra khỏi stream và được kiểm tra bằng code.
 
 Ba thành phần cần có các phương thức sau (tên đúng như trong code):
@@ -182,9 +186,9 @@ Trước khi đưa vào môi trường thật:
 - Chạy bước chuyển tài liệu (LibreOffice, pdftotext) trong sandbox không có mạng; tài liệu độc hại có thể làm LibreOffice truy cập mạng (demo đã chặn ảnh liên kết ngoài, nhưng sandbox mới là lớp chắn đúng).
 - Thêm đăng nhập, và giới hạn mọi truy vấn của store theo chủ sở hữu tài liệu.
 - Lưu file tải lên dưới tên do hệ thống tự sinh (id), không dùng tên file của người dùng.
-- Đổi việc hỏi thành POST, có kiểm tra origin, giới hạn tần suất và ngân sách chi phí (hiện `GET /ask` mỗi lần gọi là một lệnh trả phí).
+- Giới hạn tần suất và ngân sách chi phí cho `POST /ask` (mỗi câu hỏi là lệnh trả phí, câu nối tiếp tốn thêm một lệnh để viết lại).
 - Ghim phiên bản (revision) của mô hình tạo vector và digest của các image Docker.
 - Từ chối endpoint mô hình không phải https.
 - Giữ tự động escape HTML trong view của hệ thống (view demo phải tự gọi `h(...)`).
 
-Demo bỏ qua: đăng nhập và phân quyền, mở rộng tải, OCR, và nhớ hội thoại.
+Demo bỏ qua: đăng nhập và phân quyền, mở rộng tải, và OCR.

@@ -230,6 +230,16 @@ class DocumentsRouteTest < Minitest::Test
     assert_includes body, "Hỏi đáp"
   end
 
+  def test_viewer_highlights_quote_on_current_page_and_collapses_others
+    add("a.pdf", pages: [page(1, raw: "x <b> y"), page(2, raw: "trước <b>đoạn\n trích</b> sau", md: "đoạn trích")])
+    body = get("/documents/a.pdf?page=2&q=#{Rack::Utils.escape("<b>đoạn trích</b>")}").body
+    assert_includes body, %(trước <mark id="hit">&lt;b&gt;đoạn\n trích&lt;/b&gt;</mark> sau)
+    assert_equal 1, body.scan("<mark").size
+    assert_includes body, "<details><summary>Trang 1</summary>"
+    refute_includes body, "<details><summary>Trang 2</summary>"
+    refute_includes get("/documents/a.pdf?q=x").body, "<mark>" # no page, no highlight
+  end
+
   def test_viewer_marks_docx_pages_as_pdf_version
     add("a.docx", pages: [page(1), page(2)])
     add("b.pdf", pages: [page(1)])
