@@ -1,5 +1,7 @@
 require "test_helper"
 require "json"
+require "puma"
+require "puma/client"
 require "rack/mock"
 require_relative "../../web/app"
 
@@ -46,8 +48,9 @@ class AskRouteTest < Minitest::Test
     assert_equal 200, res.status
     assert_includes res.body, "Hỏi đáp tài liệu"
     assert_includes res.body, 'href="/documents"'
-    assert_includes res.body, "Chưa có tài liệu nào."
-    assert_includes res.body, "bin/ingest"
+    assert_includes res.body, "Chưa có tài liệu nào. Chạy lệnh nạp (docker compose run --rm app bin/ingest) hoặc tải file lên ở trang Tài liệu."
+    assert_includes res.body, ">Tài liệu</a>"
+    assert_match(%r{<button[^>]*>Hỏi</button>}, res.body)
   end
 
   def test_index_has_no_guidance_when_a_document_is_done
@@ -64,6 +67,7 @@ class AskRouteTest < Minitest::Test
     res = get(app_with(ask: ask), "/ask?q=hello")
     assert_includes res.content_type, "text/event-stream"
     assert_equal "no-cache", res.headers["Cache-Control"]
+    assert_equal "no", res.headers["X-Accel-Buffering"]
     ev = events(res.body)
     assert_equal %w[delta delta done], ev.map(&:first)
     assert_equal ["Xin ", "chào [S1]"], ev[0, 2].map { |_, d| d["text"] }
@@ -76,6 +80,7 @@ class AskRouteTest < Minitest::Test
     ev = events(get(app_with(ask: ask), "/ask?q=x").body)
     assert_equal %w[delta done], ev.map(&:first)
     assert_equal false, ev.last[1]["found"]
+    assert_equal "", ev.last[1]["text"]
     assert_empty ev.last[1]["sources"]
   end
 
@@ -124,11 +129,25 @@ class AskRouteTest < Minitest::Test
     assert_empty err
   end
 
+  def test_puma_connection_error_is_swallowed_quietly
+    ask = FakeAsk.new { |_q, &d| d.call("a"); raise Puma::ConnectionError }
+    body, err = capture_stderr { get(app_with(ask: ask), "/ask?q=x").body }
+    assert_equal %w[delta], events(body).map(&:first)
+    assert_empty err
+  end
+
+  def test_h_escapes_html
+    out = Web.new!.h(%(<img src=x onerror=1> "q"))
+    refute_includes out, "<"
+    refute_includes out, '"'
+  end
+
   def test_foreign_host_is_forbidden
     app = app_with
     assert_equal 403, get(app, "/", host: "evil.example").status
     assert_equal 403, get(app, "/ask?q=x", host: "evil.example").status
     assert_equal 200, get(app, "/", host: "localhost:4567").status
+    assert_equal 200, get(app, "/", host: "127.0.0.1:4567").status
   end
 
   private
