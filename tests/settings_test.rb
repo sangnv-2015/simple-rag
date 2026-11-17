@@ -10,6 +10,50 @@ class SettingsTest < Minitest::Test
                  Rag::LLM_SETTINGS)
   end
 
+  def test_tenant_and_chunking_constants
+    assert_equal ["nus", "acme"], Rag::TENANTS
+    assert_equal "nus", Rag::DEFAULT_TENANT
+    assert_equal "semantic", Rag::CHUNKING
+    assert_equal 25, Rag::SEMANTIC_PERCENTILE
+  end
+
+  def test_string_list_type
+    assert_equal ["a", "b"], load_yaml("l: [a, b]", {"l" => :string_list})["l"]
+    ["l: []", "l: [a, 1]", "l: x"].each do |text|
+      e = assert_raises(Rag::Error) { load_yaml(text, {"l" => :string_list}) }
+      assert_includes e.message, "l must be a list of strings"
+    end
+  end
+
+  def test_load_tenants_rejects_default_outside_list
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "tenants.yaml")
+      File.write(path, "tenants: [a]\ndefault: b\n")
+      e = assert_raises(Rag::Error) { Rag.load_tenants(path) }
+      assert_includes e.message, "default must be one of tenants"
+    end
+  end
+
+  def test_doc_current_on_is_inclusive
+    d1 = Date.new(2026, 1, 1)
+    d2 = Date.new(2026, 12, 31)
+    doc = Rag::Doc.new(status: "done", valid_from: d1, valid_to: d2)
+    assert doc.current?(d1)
+    assert doc.current?(d2)
+    refute doc.current?(d1 - 1)
+    refute doc.current?(d2 + 1)
+    refute Rag::Doc.new(status: "expired", valid_from: d1, valid_to: d2).current?(d1)
+  end
+
+  def test_hit_score_is_one_minus_distance
+    assert_equal 0.75, Rag::Hit.new(distance: 0.25).score
+  end
+
+  def test_answer_status
+    assert_equal "answered", Rag::Answer.new("t", true, []).status
+    assert_equal "not_enough_information", Rag::Answer.new("t", false, []).status
+  end
+
   def load_yaml(text, schema)
     Dir.mktmpdir do |dir|
       path = File.join(dir, "x.yaml")

@@ -7,3 +7,8 @@ min_quote_chars: 10
 max_pages: 200 # every readable page is one paid model call
 max_page_chars: 20000
 max_upload_mb: 30
+chunking: semantic
+min_score: 0.0 # placeholder, calibrated against real queries
+semantic_breakpoint_percentile: 25
+semantic_floor: 0.85
+semantic_min_units: 5

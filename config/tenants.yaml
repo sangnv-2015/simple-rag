@@ -1,0 +1,2 @@
+tenants: [nus, acme]
+default: nus

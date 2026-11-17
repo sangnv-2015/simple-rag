@@ -1,6 +1,8 @@
 module Rag
-  Source = Struct.new(:n, :filename, :page, :quote)
-  Answer = Struct.new(:text, :found, :sources, :standalone)
+  Source = Struct.new(:n, :filename, :page, :quote, :chunk_id, :document_id, :title, :version)
+  Answer = Struct.new(:text, :found, :sources, :standalone, :hits) do
+    def status = found ? "answered" : "not_enough_information"
+  end
 
   class Ask
     QUOTES_MARKER = "\n<<QUOTES>>\n"
