@@ -1,0 +1,34 @@
+#!/usr/bin/env ruby
+# Source of truth for documents/ and samples/upload-demo/: HTML -> docx (-> pdf). Never edit the binaries by hand.
+require "open3"
+require "yaml"
+require "fileutils"
+$LOAD_PATH.unshift("lib")
+require "rag"
+
+LO = ["soffice", "--headless", "-env:UserInstallation=file:///tmp/lo-profile"].freeze
+WORK = "tmp/build"
+
+def run(*cmd)
+  out, err, st = Open3.capture3("timeout", "120", *cmd)
+  abort "FAIL #{cmd[1]}: #{err[0, 300]}" unless st.success?
+  out
+end
+
+FileUtils.mkdir_p(WORK)
+failed = false
+YAML.safe_load_file("samples/manifest.yml", symbolize_names: true).each do |m|
+  stem = File.basename(m[:src], ".html")
+  run(*LO, "--infilter=HTML (StarWriter)", "--convert-to", "docx", "--outdir", WORK, "samples/src/#{m[:src]}")
+  FileUtils.mkdir_p(File.dirname(m[:out]))
+  if File.extname(m[:out]) == ".pdf"
+    run(*LO, "--convert-to", "pdf", "--outdir", File.dirname(m[:out]), "#{WORK}/#{stem}.docx")
+  else
+    FileUtils.cp("#{WORK}/#{stem}.docx", m[:out])
+  end
+  pages = Rag::Extract.pages(m[:out])
+  ok = pages.size >= 3 && pages.all?(&:readable)
+  failed ||= !ok
+  puts "#{ok ? 'built' : 'FAILED'} #{m[:out]} (#{pages.size} pages)"
+end
+exit(failed ? 1 : 0)

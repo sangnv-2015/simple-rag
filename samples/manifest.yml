@@ -1,0 +1,4 @@
+- {src: quy-che-nghi-phep.html, out: documents/quy-che-nghi-phep.pdf, lang: vi, preload: true}
+- {src: quy-dinh-lam-viec-tu-xa.html, out: documents/quy-dinh-lam-viec-tu-xa.docx, lang: vi, preload: true}
+- {src: travel-expense-policy.html, out: documents/travel-expense-policy.pdf, lang: en, preload: true}
+- {src: chinh-sach-hoan-tien.html, out: samples/upload-demo/chinh-sach-hoan-tien.docx, lang: vi, preload: false}
