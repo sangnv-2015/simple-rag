@@ -22,9 +22,11 @@ class IngestTest < Minitest::Test
 
   def write(name, body = "x") = File.join(@dir, name).tap { |p| File.write(p, body) }
 
+  # "structure" by default: the older tests assert one embed call and Chunker.split output; semantic is the real default.
   def ingest(files, opts = {})
     @extractor = FakeExtractor.new(files)
-    Rag::Ingest.new(llm: opts.fetch(:llm, @llm), embedder: @embedder, store: opts.fetch(:store, @store), extractor: @extractor)
+    Rag::Ingest.new(llm: opts.fetch(:llm, @llm), embedder: @embedder, store: opts.fetch(:store, @store), extractor: @extractor,
+                    chunking: opts.fetch(:chunking, "structure"))
   end
 
   def test_ingests_file_and_stores_pages_chunks_with_page_numbers
@@ -304,5 +306,36 @@ class IngestTest < Minitest::Test
     prep = ing.prepare(path, meta)
     assert_equal "File hỏng", ing.run(prep.id, path)
     assert_equal "error", @store.document(prep.id).status
+  end
+
+  def test_semantic_chunking_is_the_default_and_embeds_units_then_chunks
+    path = write("a.pdf")
+    @extractor = FakeExtractor.new("a.pdf" => [page(1, "Câu một. Câu hai.")])
+    llm = FakeLLM.new { "# Tiêu đề\nCâu một. Câu hai." }
+    ing = Rag::Ingest.new(llm: llm, embedder: @embedder, store: @store, extractor: @extractor)
+    assert_equal ["a.pdf"], ing.call(path, meta).ok
+    assert_equal 2, @embedder.inputs.size
+    assert_equal 2, @embedder.inputs.first.size # units
+  end
+
+  def test_chunking_structure_matches_chunker_split
+    path = write("a.pdf")
+    text = "Câu một. Câu hai."
+    ingest({ "a.pdf" => [page(1, text)] }, chunking: "structure").call(path, meta)
+    assert_equal 1, @embedder.inputs.size
+    assert_equal Rag::Chunker.split("# " + text), @embedder.inputs.first
+  end
+
+  def test_expired_unchanged_version_is_skipped_without_new_calls
+    p1 = write("v1.pdf")
+    p2 = write("v2.pdf", "other")
+    ing = ingest("v1.pdf" => [page(1)], "v2.pdf" => [page(1)])
+    ing.call(p1, meta(version: 1))
+    ing.call(p2, meta(version: 2))
+    llm_n, emb_n = @llm.calls.size, @embedder.inputs.size
+    report = ing.call(@dir, "v1.pdf" => meta(version: 1), "v2.pdf" => meta(version: 2))
+    assert_equal %w[v1.pdf v2.pdf], report.skipped.sort
+    assert_equal [llm_n, emb_n], [@llm.calls.size, @embedder.inputs.size]
+    assert_equal "expired", by_name(@store, "v1.pdf").status
   end
 end

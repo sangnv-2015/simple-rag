@@ -41,7 +41,7 @@ module Rag
       raise Error, "Chỉ nhận file .pdf và .docx." unless EXTENSIONS.include?(File.extname(name).downcase)
       sha = Digest::SHA256.file(path).hexdigest
       existing = @store.find_document(tenant_id: meta.tenant_id, title: meta.title, version: meta.version)
-      return Prepared.new(existing.id, true, name) if existing && existing.sha256 == sha && existing.status == "done"
+      return Prepared.new(existing.id, true, name) if existing && existing.sha256 == sha && %w[done expired].include?(existing.status)
       id = @store.start_document(**meta.to_h, filename: name, path: path, sha256: sha)
       Prepared.new(id, false, name)
     end
@@ -98,11 +98,16 @@ module Rag
         page.fallback = r.fallback
       end
       pieces = readable.flat_map do |page|
-        Chunker.split(page.fallback ? page.raw_text : page.markdown).each_with_index.map { |t, i| [page, i, t] }
+        chunk(page.fallback ? page.raw_text : page.markdown).each_with_index.map { |t, i| [page, i, t] }
       end
       vectors = @embedder.embed_passages(pieces.map(&:last))
       chunks = pieces.zip(vectors).map { |(page, i, t), v| Chunk.new(page: page.number, position: i, text: t, embedding: v) }
       [pages, chunks]
+    end
+
+    def chunk(text)
+      return Chunker.split(text) if @chunking == "structure"
+      SemanticChunker.split(text, embed: ->(t) { @embedder.embed_passages(t) })
     end
 
     # A dead database must not abort the rest of the batch.

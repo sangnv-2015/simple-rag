@@ -32,6 +32,20 @@ class MetadataTest < Minitest::Test
     [0, -1, "1.5", "abc", nil, "0"].each { |v| assert_equal :version, field_of(version: v) }
   end
 
+  def test_version_above_postgres_integer_max
+    assert_equal :version, field_of(version: 2_147_483_648)
+    assert_equal :version, field_of(version: "99999999999")
+    assert_equal 2_147_483_647, Rag::Meta.parse(OK.merge(version: 2_147_483_647)).version
+  end
+
+  def test_dates_outside_postgres_years
+    ["0000-01-01", Date.new(0, 1, 1), Date.new(10_000, 1, 1)].each do |d|
+      assert_equal :valid_from, field_of(valid_from: d, valid_to: "9999-12-31")
+      assert_equal :valid_to, field_of(valid_to: d)
+    end
+    assert Rag::Meta.parse(OK.merge(valid_from: "0001-01-01", valid_to: "9999-12-31"))
+  end
+
   def test_invalid_dates
     ["2026-13-01", "2026-1-1", "20260101", nil].each do |d|
       assert_equal :valid_from, field_of(valid_from: d)

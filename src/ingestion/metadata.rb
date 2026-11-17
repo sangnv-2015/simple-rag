@@ -33,14 +33,18 @@ module Rag
 
     def self.version(v)
       n = v.is_a?(Integer) ? v : (v.is_a?(String) && v.match?(/\A\d+\z/) ? v.to_i : 0)
-      raise Invalid.new(:version, "Phiên bản phải là số nguyên dương.") unless n.positive?
+      raise Invalid.new(:version, "Phiên bản phải là số nguyên dương.") unless (1..2_147_483_647).cover?(n)
       n
     end
 
     def self.date(v, field)
-      return v if v.is_a?(Date)
-      raise ArgumentError unless v.is_a?(String) && v.match?(/\A\d{4}-\d{2}-\d{2}\z/)
-      Date.iso8601(v)
+      d = v if v.is_a?(Date)
+      unless d
+        raise ArgumentError unless v.is_a?(String) && v.match?(/\A\d{4}-\d{2}-\d{2}\z/)
+        d = Date.iso8601(v)
+      end
+      raise ArgumentError unless (1..9999).cover?(d.year) # Postgres date range
+      d
     rescue ArgumentError # Date::Error is a subclass
       raise Invalid.new(field, "Ngày phải có dạng YYYY-MM-DD.")
     end
