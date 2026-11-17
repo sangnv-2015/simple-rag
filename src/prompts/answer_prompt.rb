@@ -1,3 +1,4 @@
+require_relative "../generation/ask" # reads Ask constants at load time; keeps the load order irrelevant
 module Rag
   module Prompts
     RULES = <<~TXT
