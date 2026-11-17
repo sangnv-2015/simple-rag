@@ -1,4 +1,4 @@
-<p><a href="/documents">Tài liệu</a> · <a href="/">Hỏi đáp</a></p>
+<p><a href="/documents?tenant=<%= h @doc.tenant_id %>">Tài liệu</a> · <a href="/">Hỏi đáp</a></p>
 <h2><%= h @doc.title %> <small>v<%= h @doc.version %> · <%= h @name %></small></h2>
 <% @pages.each do |pg| %>
 <% other = @current && pg.number != @current %>

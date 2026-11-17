@@ -152,10 +152,12 @@ class DocumentsRouteTest < Minitest::Test
   end
 
   def test_upload_invalid_metadata_is_422_and_leaves_nothing
-    [{ title: " " }, { version: "0" }, { valid_from: "2027-01-01" }, { tenant_id: "evil" }, { valid_to: "" }].each do |m|
+    [[{ title: " " }, "Tiêu đề phải có từ 1 đến 200 ký tự."], [{ version: "0" }, "Phiên bản phải là số nguyên dương."],
+     [{ valid_from: "2027-01-01" }, "Ngày hết hiệu lực phải sau hoặc bằng ngày bắt đầu."],
+     [{ tenant_id: "evil" }, "Tenant không hợp lệ."], [{ valid_to: "" }, "Ngày phải có dạng YYYY-MM-DD."]].each do |m, msg|
       res = upload(meta: m)
       assert_equal 422, res.status, m.inspect
-      assert_match(/Tiêu đề|Phiên bản|Ngày|Tenant/, res.body)
+      assert_match(/role="alert">#{Regexp.escape(msg)}</, res.body)
       assert_empty uploads
       assert_empty uploads("evil")
       assert_empty @worker.enqueued
@@ -173,6 +175,22 @@ class DocumentsRouteTest < Minitest::Test
     assert_empty uploads
     assert_empty @worker.enqueued
     assert_equal 1, @store.documents.size
+  end
+
+  def test_reupload_of_same_title_and_version_leaves_only_the_new_file
+    assert_equal 303, upload(body: "%PDF-1.4 one").status
+    assert_equal 303, upload(body: "%PDF-1.4 two").status
+    assert_equal 1, uploads.size
+    assert_equal "%PDF-1.4 two", File.read(uploads.fetch(0))
+    assert_equal 1, @store.documents.size
+  end
+
+  def test_list_refresh_ignores_pending_ids_of_other_tenants
+    other = add("ac.pdf", tenant_id: "acme", status: "processing")
+    add("n.pdf")
+    @worker.names = [other]
+    refute_includes get("/documents").body, 'http-equiv="refresh"'
+    assert_includes get("/documents?tenant=acme").body, 'http-equiv="refresh"'
   end
 
   def test_upload_removes_saved_file_when_prepare_raises
@@ -357,6 +375,7 @@ class DocumentsRouteTest < Minitest::Test
     seed = File.join(@dir, "seed.pdf")
     outside = File.join(Dir.mktmpdir, "o.pdf")
     [seed, outside].each { |f| File.write(f, "x") }
+    FileUtils.mkdir_p(File.join(@dir, "uploads", "nus")) # so the containment check itself is exercised
     a = add("seed.pdf", path: seed)
     b = add("o.pdf", path: outside, title: "o")
     [a, b].each { |id| assert_equal 303, post_form("/documents/#{id}/delete", tenant_id: "nus").status }

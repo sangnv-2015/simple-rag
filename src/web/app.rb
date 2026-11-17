@@ -152,6 +152,7 @@ class Web < Sinatra::Base
     dir = File.join(settings.documents_dir, "uploads", meta.tenant_id)
     FileUtils.mkdir_p(dir)
     path = Rag::Upload.save(filename: file[:filename], io: file[:tempfile], dir: dir, max_bytes: settings.max_upload_bytes, unique: true)
+    old = settings.store.find_document(tenant_id: meta.tenant_id, title: meta.title, version: meta.version)
     begin
       prep = settings.ingest.prepare(path, meta, filename: Rag::Upload.sanitize(file[:filename]))
     rescue StandardError
@@ -161,6 +162,8 @@ class Web < Sinatra::Base
     if prep.skipped
       Rag::Upload.remove(path, root: uploads_root)
     else
+      # start_document replaced the old row; its uploaded file would be orphaned.
+      Rag::Upload.remove(old.path, root: uploads_root) if old && old.path != path
       settings.worker.enqueue(prep.id, path)
     end
     prep
@@ -220,7 +223,7 @@ class Web < Sinatra::Base
               end
       [d, label]
     end
-    @refresh = message.nil? && !pending.empty?
+    @refresh = message.nil? && @rows.any? { |d, _| pending.include?(d.id) }
     erb :documents
   end
 end
