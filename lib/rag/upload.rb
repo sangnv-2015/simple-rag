@@ -16,7 +16,9 @@ module Rag
       ext = ext.downcase
       raise Rejected, "Chỉ nhận file .pdf và .docx." if stem.empty? || dot.empty? || !EXTENSIONS.include?(ext)
 
-      "#{stem[0, 100]}.#{ext}"
+      stem = stem[0, 100]
+      stem = stem.chop while stem.bytesize > 200 # filesystem name limit is 255 bytes
+      "#{stem}.#{ext}"
     end
 
     def self.save(filename:, io:, dir:, max_bytes: Rag::MAX_UPLOAD_BYTES)
@@ -28,19 +30,27 @@ module Rag
 
       # Not a .pdf/.docx name, so a crash leaves nothing ingest would pick up.
       tmp = File.join(root, ".upload-#{SecureRandom.hex(8)}.tmp")
+      created = false
       begin
         total = 0
-        File.open(tmp, "wb", 0o600) do |f|
-          while (chunk = io.read(CHUNK))
+        # EXCL: never follow or truncate anything already at the temp name.
+        File.open(tmp, File::WRONLY | File::CREAT | File::EXCL, 0o600) do |f|
+          created = true
+          f.binmode
+          while (chunk = io.read(CHUNK)) && !chunk.empty?
             total += chunk.bytesize
             raise Rejected, "File quá lớn (tối đa 30 MB)." if total > max_bytes
 
             f.write(chunk)
           end
         end
-        File.rename(tmp, final)
+        begin
+          File.rename(tmp, final)
+        rescue SystemCallError
+          raise Rejected, "Tên file không hợp lệ."
+        end
       ensure
-        File.delete(tmp) if File.exist?(tmp)
+        File.delete(tmp) if created && File.exist?(tmp)
       end
       final
     end

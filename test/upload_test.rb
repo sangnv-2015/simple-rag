@@ -79,7 +79,8 @@ class UploadTest < Minitest::Test
 
   def test_directory_target_is_rejected
     Dir.mkdir(File.join(@dir, "d.pdf"))
-    assert_raises(Rag::Upload::Rejected) { save("d.pdf") }
+    e = assert_raises(Rag::Upload::Rejected) { save("d.pdf") }
+    assert_equal "T\u00ean file kh\u00f4ng h\u1ee3p l\u1ec7.", e.message
     assert_equal ["d.pdf"], Dir.children(@dir)
   end
 
@@ -102,5 +103,24 @@ class UploadTest < Minitest::Test
   def test_long_stem_is_capped_and_extension_kept
     n = Rag::Upload.sanitize("#{"a" * 300}.PDF")
     assert_equal "#{"a" * 100}.pdf", n
+  end
+
+  def test_multibyte_long_stem_is_capped_by_bytes
+    path = save("\u1ec7" * 120 + ".pdf")
+    assert_operator File.basename(path).bytesize, :<=, 255
+  end
+
+  def test_empty_string_read_means_eof
+    io = Object.new
+    def io.read(*) = (@n = (@n || 0) + 1) == 1 ? "abc" : ""
+    path = Rag::Upload.save(filename: "a.pdf", io: io, dir: @dir)
+    assert_equal "abc", File.read(path)
+  end
+
+  def test_nfd_and_nfc_names_are_one_document
+    name = "Quy \u0111\u1ecbnh.pdf"
+    save(name)
+    save(name.unicode_normalize(:nfd))
+    assert_equal 1, Dir.children(@dir).size
   end
 end
