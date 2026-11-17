@@ -14,7 +14,7 @@ module Rag
     NETWORK_ERRORS = [SocketError, SystemCallError, Timeout::Error, EOFError, IOError, OpenSSL::SSL::SSLError,
                       URI::InvalidURIError, Net::HTTPBadResponse, Zlib::Error].freeze
 
-    def initialize(api_key:, base_url:, model: "deepseek-flash", read_timeout: 120)
+    def initialize(api_key:, base_url:, model: LLM_SETTINGS.fetch("default_model"), read_timeout: LLM_SETTINGS.fetch("read_timeout"))
       @api_key = api_key
       @base_url = base_url
       @model = model
@@ -26,7 +26,9 @@ module Rag
     def pretty_print(q) = q.text(inspect)
 
     def chat(messages, &on_delta)
-      body = {model: @model, messages: messages, reasoning: {enabled: false}, temperature: 0}
+      body = {model: @model, messages: messages}
+      body[:reasoning] = {enabled: false} if LLM_SETTINGS.fetch("disable_reasoning")
+      body[:temperature] = LLM_SETTINGS.fetch("temperature")
       body[:stream] = true if on_delta
       started = false
       callback_error = nil

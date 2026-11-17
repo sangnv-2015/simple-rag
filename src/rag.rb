@@ -1,13 +1,20 @@
+require "yaml"
+
 module Rag
-  EMBED_MODEL = "Xenova/multilingual-e5-small"
-  EMBED_DIM = 384
-  MAX_CHUNK_CHARS = 1000 # 1000 Vietnamese chars = 252 tokens (scripts/spikes/RESULTS.md)
-  MIN_LETTERS = 20
-  TOP_K = 6
-  MAX_UPLOAD_BYTES = 30 * 1024 * 1024
-  MIN_QUOTE_CHARS = 10
-  MAX_PAGES = 200 # every readable page is one paid model call
-  MAX_PAGE_CHARS = 20_000
+  # Settings live in config/*.yaml (non-secret); a missing key raises KeyError at load time.
+  CONFIG_DIR = File.expand_path("../config", __dir__)
+  RETRIEVER_SETTINGS = YAML.safe_load_file(File.join(CONFIG_DIR, "retriever.yaml")).freeze
+  LLM_SETTINGS = YAML.safe_load_file(File.join(CONFIG_DIR, "llm.yaml")).freeze
+
+  EMBED_MODEL = RETRIEVER_SETTINGS.fetch("embed_model")
+  EMBED_DIM = RETRIEVER_SETTINGS.fetch("embed_dim")
+  MAX_CHUNK_CHARS = RETRIEVER_SETTINGS.fetch("max_chunk_chars")
+  MIN_LETTERS = RETRIEVER_SETTINGS.fetch("min_letters")
+  TOP_K = RETRIEVER_SETTINGS.fetch("top_k")
+  MAX_UPLOAD_BYTES = RETRIEVER_SETTINGS.fetch("max_upload_mb") * 1024 * 1024
+  MIN_QUOTE_CHARS = RETRIEVER_SETTINGS.fetch("min_quote_chars")
+  MAX_PAGES = RETRIEVER_SETTINGS.fetch("max_pages")
+  MAX_PAGE_CHARS = RETRIEVER_SETTINGS.fetch("max_page_chars")
 
   class Error < StandardError; end
 

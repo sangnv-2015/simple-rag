@@ -5,7 +5,7 @@ module Rag
     def self.from_env(env = ENV)
       missing = %w[DEEPSEEK_API_KEY DEEPSEEK_API_BASE].select { |k| env[k].to_s.strip.empty? }
       raise ConfigError, "Thiếu biến môi trường: #{missing.join(", ")}. Hãy điền trong file .env (xem .env.example)." unless missing.empty?
-      new(env["DEEPSEEK_API_KEY"], env["DEEPSEEK_API_BASE"], presence(env["DEEPSEEK_MODEL"]) || "deepseek-flash",
+      new(env["DEEPSEEK_API_KEY"], env["DEEPSEEK_API_BASE"], presence(env["DEEPSEEK_MODEL"]) || LLM_SETTINGS.fetch("default_model"),
           env["DATABASE_URL"], presence(env["DOCUMENTS_DIR"]) || File.expand_path("../data/raw", __dir__))
     end
 
