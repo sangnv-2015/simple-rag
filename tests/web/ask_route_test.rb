@@ -6,16 +6,17 @@ require "rack/mock"
 require_relative "../../src/web/app"
 
 class FakeAsk
-  attr_reader :calls, :histories
+  attr_reader :calls, :histories, :kwargs
 
   # script: Proc(question, &on_delta) -> Answer; may raise.
   def initialize(&script)
-    @script, @calls, @histories = script, [], []
+    @script, @calls, @histories, @kwargs = script, [], [], []
   end
 
-  def call(question, history = [], &on_delta)
+  def call(question, history = [], tenant_id: nil, document_ids: [], source: "cli", &on_delta)
     @calls << question
     @histories << history
+    @kwargs << { tenant_id: tenant_id, document_ids: document_ids, source: source }
     @script.call(question, &on_delta)
   end
 end
@@ -34,8 +35,9 @@ class AskRouteTest < Minitest::Test
     Rack::MockRequest.new(app).get(path, env)
   end
 
-  def post_ask(app, body, host: "localhost:4567", origin: nil)
+  def post_ask(app, body, host: "localhost:4567", origin: nil, tenant: :none)
     env = { "HTTP_HOST" => host }
+    env["HTTP_X_TENANT_ID"] = tenant unless tenant == :none
     env["HTTP_ORIGIN"] = origin if origin
     json = body.is_a?(String) ? body.dup : JSON.generate(body)
     Rack::MockRequest.new(app).post("/ask", env.merge(input: json, "CONTENT_TYPE" => "application/json"))
@@ -87,7 +89,8 @@ class AskRouteTest < Minitest::Test
     assert_equal %w[delta delta done], ev.map(&:first)
     assert_equal ["Xin ", "chào [S1]"], ev[0, 2].map { |_, d| d["text"] }
     assert_equal true, ev[2][1]["found"]
-    assert_equal({ "n" => 1, "filename" => "a.docx", "page" => 3, "quote" => "trích dẫn", "docx" => true }, ev[2][1]["sources"][0])
+    assert_equal({ "n" => 1, "filename" => "a.docx", "page" => 3, "quote" => "trích dẫn", "docx" => true,
+                   "chunk_id" => nil, "document_id" => nil, "title" => nil, "version" => nil }, ev[2][1]["sources"][0])
   end
 
   def test_not_found_after_streamed_text_still_reports_found_false
@@ -272,6 +275,61 @@ class AskRouteTest < Minitest::Test
     env = { "HTTP_HOST" => "localhost:4567", "CONTENT_LENGTH" => "65537", input: +"{}", "CONTENT_TYPE" => "application/json" }
     assert_equal 413, Rack::MockRequest.new(app).post("/ask", env).status
     assert_equal 1, ask.calls.size
+  end
+
+  def test_ask_passes_tenant_header_and_document_ids_and_source_web
+    ask = FakeAsk.new { Rag::Answer.new("", false, []) }
+    post_ask(app_with(ask: ask), { "q" => "x", "document_ids" => [3, 5] }, tenant: "acme")
+    assert_equal [{ tenant_id: "acme", document_ids: [3, 5], source: "web" }], ask.kwargs
+  end
+
+  def test_missing_tenant_header_uses_default
+    ask = FakeAsk.new { Rag::Answer.new("", false, []) }
+    post_ask(app_with(ask: ask), { "q" => "x" })
+    assert_equal [{ tenant_id: Rag::DEFAULT_TENANT, document_ids: [], source: "web" }], ask.kwargs
+  end
+
+  def test_unknown_or_blank_tenant_header_is_400_and_ask_not_called
+    ask = FakeAsk.new { raise "must not be called" }
+    app = app_with(ask: ask)
+    ["", "NUS", " nus", "zzz"].each { |t| assert_equal 400, post_ask(app, { "q" => "x" }, tenant: t).status, t.inspect }
+    assert_empty ask.calls
+  end
+
+  def test_document_ids_validation
+    ask = FakeAsk.new { raise "must not be called" }
+    app = app_with(ask: ask)
+    ["1", [0], [-1], ["a"], [1.5], [nil], (1..201).to_a, {}].each do |ids|
+      assert_equal 400, post_ask(app, { "q" => "x", "document_ids" => ids }).status, ids.inspect
+    end
+    assert_empty ask.calls
+    ok = FakeAsk.new { Rag::Answer.new("", false, []) }
+    assert_equal 200, post_ask(app_with(ask: ok), { "q" => "x", "document_ids" => (1..200).to_a }).status
+  end
+
+  def test_done_event_carries_chunks_and_source_ids
+    hit = Rag::Hit.new(filename: "a.pdf", page: 2, text: "nội dung", distance: 0.12345, chunk_id: 9, document_id: 4, title: "Chính sách", version: 3)
+    src = Rag::Source.new(1, "a.pdf", 2, "nội", 9, 4, "Chính sách", 3)
+    ask = FakeAsk.new { Rag::Answer.new("t [S1]", true, [src], nil, [hit]) }
+    done = events(post_ask(app_with(ask: ask), { "q" => "x" }).body).last[1]
+    assert_equal({ "chunk_id" => 9, "document_id" => 4, "title" => "Chính sách", "version" => 3, "page" => 2, "score" => 0.877, "content" => "nội dung" }, done["chunks"][0])
+    assert_equal [9, 4, "Chính sách", 3], done["sources"][0].values_at("chunk_id", "document_id", "title", "version")
+  end
+
+  def test_done_event_has_chunks_when_not_found
+    hit = Rag::Hit.new(filename: "a.pdf", page: 1, text: "y", distance: 0.7, chunk_id: 1, document_id: 1, title: "T", version: 1)
+    ask = FakeAsk.new { Rag::Answer.new("", false, [], nil, [hit]) }
+    done = events(post_ask(app_with(ask: ask), { "q" => "x" }).body).last[1]
+    assert_equal false, done["found"]
+    assert_equal [0.3], done["chunks"].map { |c| c["score"] }
+  end
+
+  def test_index_has_tenant_select_scope_and_chunk_hooks
+    body = get(app_with, "/").body
+    assert_match(/<select id="tenant"/, body)
+    assert_match(/<option value="nus" selected>/, body)
+    assert_match(/<option value="acme">/, body)
+    assert_includes body, 'id="scope"'
   end
 
   private

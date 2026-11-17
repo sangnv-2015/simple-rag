@@ -46,6 +46,7 @@ class Web < Sinatra::Base
   TOO_LARGE = "File quá lớn (tối đa 30 MB).".freeze
   MULTIPART_OVERHEAD = 1024 * 1024
   MAX_ASK_BODY = 64 * 1024
+  MAX_DOCUMENT_IDS = 200
   HISTORY_TURNS = 3
   HISTORY_Q_MAX = 1000
   HISTORY_A_MAX = 2000
@@ -86,16 +87,21 @@ class Web < Sinatra::Base
     request.body.rewind if request.body.respond_to?(:rewind) # Rack 3: rack.input need not be rewindable
     raw = request.body.read(MAX_ASK_BODY + 1).to_s # also caps chunked bodies without Content-Length
     halt 413, ASK_TOO_LARGE if raw.bytesize > MAX_ASK_BODY
-    q, history = parse_ask(raw)
+    tenant = ask_tenant
+    q, history, document_ids = parse_ask(raw)
     content_type "text/event-stream"
     headers "Cache-Control" => "no-cache", "X-Accel-Buffering" => "no"
     stream do |out|
       send_event = ->(name, data) { out << "event: #{name}\ndata: #{JSON.generate(data)}\n\n" }
       begin
-        answer = settings.ask.call(q, history) { |d| send_event.call("delta", { text: d }) }
+        answer = settings.ask.call(q, history, tenant_id: tenant, document_ids: document_ids, source: "web") { |d| send_event.call("delta", { text: d }) }
         done = {
           found: answer.found, text: answer.found ? answer.text : "",
-          sources: answer.sources.map { |s| { n: s.n, filename: s.filename, page: s.page, quote: s.quote, docx: s.filename.downcase.end_with?(".docx") } }
+          sources: answer.sources.map do |s|
+            { n: s.n, filename: s.filename, page: s.page, quote: s.quote, docx: s.filename.downcase.end_with?(".docx"),
+              chunk_id: s.chunk_id, document_id: s.document_id, title: s.title, version: s.version }
+          end,
+          chunks: (answer.hits || []).map { |hit| WebApi.chunk(hit) }
         }
         done[:standalone] = answer.standalone if answer.standalone && Rag::Text.squash(answer.standalone) != Rag::Text.squash(q)
         send_event.call("done", done)
@@ -199,7 +205,13 @@ class Web < Sinatra::Base
     raw.to_i
   end
 
-  # -> [question, history] with history as at most 3 {q:, a:} Symbol-key hashes, or halts 400.
+  # Absent -> default tenant; present but unknown/blank/repeated -> 400.
+  def ask_tenant
+    return Rag::DEFAULT_TENANT unless request.env.key?("HTTP_X_TENANT_ID")
+    tenant_param(request.env["HTTP_X_TENANT_ID"])
+  end
+
+  # -> [question, history, document_ids] with history as at most 3 {q:, a:} Symbol-key hashes, or halts 400.
   def parse_ask(raw)
     data = begin
       JSON.parse(raw)
@@ -211,7 +223,9 @@ class Web < Sinatra::Base
     halt 400, BAD_REQUEST unless q.is_a?(String) && q.valid_encoding? && !q.strip.empty?
     halt 400, BAD_REQUEST unless history.is_a?(Array) &&
                                  history.all? { |t| t.is_a?(Hash) && [t["q"], t["a"]].all? { |v| v.is_a?(String) && v.valid_encoding? } }
-    [q, history.last(HISTORY_TURNS).map { |t| { q: t["q"][0, HISTORY_Q_MAX], a: t["a"][0, HISTORY_A_MAX] } }]
+    ids = data.fetch("document_ids", [])
+    halt 400, BAD_REQUEST unless ids.is_a?(Array) && ids.size <= MAX_DOCUMENT_IDS && ids.all? { |i| i.is_a?(Integer) && i.positive? }
+    [q, history.last(HISTORY_TURNS).map { |t| { q: t["q"][0, HISTORY_Q_MAX], a: t["a"][0, HISTORY_A_MAX] } }, ids]
   end
 
   def list_page(message, tenant)

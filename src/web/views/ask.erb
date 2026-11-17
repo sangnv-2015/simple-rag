@@ -10,6 +10,16 @@
 <% if @empty %>
     <p class="note">Chưa có tài liệu nào. Chạy lệnh nạp (docker compose run --rm app scripts/ingest) hoặc tải file lên ở trang Tài liệu.</p>
 <% end %>
+    <div class="scope-bar">
+      <label for="tenant">Tenant</label>
+      <select id="tenant">
+<% Rag::TENANTS.each do |t| %>
+        <option value="<%= h t %>"<%= " selected" if t == Rag::DEFAULT_TENANT %>><%= h t %></option>
+<% end %>
+      </select>
+      <div id="scope" aria-label="Tài liệu được tìm"></div>
+      <p id="scope-msg" class="meta" role="alert" hidden></p>
+    </div>
     <div id="chat"></div>
     <div class="welcome">
       <span class="brand-mark" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
@@ -30,10 +40,15 @@
 (function () {
   var form = document.getElementById("form"), input = document.getElementById("q"),
       go = document.getElementById("go"), chat = document.getElementById("chat"),
-      newChat = document.getElementById("new-chat"), list = document.getElementById("sidebar-list");
+      newChat = document.getElementById("new-chat"), list = document.getElementById("sidebar-list"),
+      tenantSel = document.getElementById("tenant"), scope = document.getElementById("scope"), scopeMsg = document.getElementById("scope-msg");
+  var DEFAULT_TENANT = tenantSel.querySelector("option[selected]").value, TENANT_KEY = "rag.tenant", scopeSeq = 0;
   var NOT_FOUND = "Không tìm thấy thông tin này trong tài liệu.";
   var ERROR_TEXT = "Không thể trả lời lúc này. Vui lòng thử lại sau.";
   var current = { id: null, turns: [] }, ctrl = null;
+
+  function tenant() { return tenantSel.value; }
+  function tenantOf(c) { return c.tenant || DEFAULT_TENANT; } // chats saved before tenants existed belong to the default tenant
 
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -87,9 +102,10 @@
     li.id = "src-" + idx + "-" + s.n;
     // shortcut: only the first 40 words go in the link to stay under URL limits; the highlight then covers that prefix.
     var q = s.quote ? "&q=" + encodeURIComponent(s.quote.split(" ").slice(0, 40).join(" ")) : "";
-    a.href = "/documents/" + encodeURIComponent(s.filename) + "?page=" + encodeURIComponent(s.page) + q + (q ? "#hit" : "#page-" + encodeURIComponent(s.page));
+    // Chats saved before document ids existed have no document_id: show them without a link.
+    if (s.document_id != null) a.href = "/documents/" + encodeURIComponent(s.document_id) + "?page=" + encodeURIComponent(s.page) + q + (q ? "#hit" : "#page-" + encodeURIComponent(s.page));
     a.appendChild(el("span", "cite", String(s.n)));
-    a.appendChild(document.createTextNode(" " + s.filename));
+    a.appendChild(document.createTextNode(" " + (s.title ? s.title + " v" + s.version : s.filename)));
     li.appendChild(a);
     li.appendChild(el("span", "meta", " · trang " + s.page + (s.docx ? " (bản PDF)" : "")));
     li.appendChild(s.quote ? el("blockquote", null, s.quote) : el("p", "meta", "Không xác minh được đoạn trích"));
@@ -102,11 +118,11 @@
   function buildTurn(q) {
     var root = el("div", "turn"), t = {
       root: root, meta: el("p", "meta"), ans: el("div", "answer"),
-      title: el("h3", null, "Nguồn"), list: el("ol", "sources")
+      title: el("h3", null, "Nguồn"), list: el("ol", "sources"), chunks: el("details", "chunks")
     };
     root.appendChild(el("p", "question", q));
-    t.meta.hidden = t.title.hidden = true;
-    [t.meta, t.ans, t.title, t.list].forEach(function (n) { root.appendChild(n); });
+    t.meta.hidden = t.title.hidden = t.chunks.hidden = true;
+    [t.meta, t.ans, t.title, t.list, t.chunks].forEach(function (n) { root.appendChild(n); });
     chat.appendChild(root);
     return t;
   }
@@ -119,6 +135,21 @@
     t.list.textContent = "";
     (turn.found ? turn.sources || [] : []).forEach(function (s) { addSource(t.list, s, idx); });
     t.title.hidden = !t.list.children.length;
+    addChunks(t, turn.chunks || []);
+  }
+
+  // "Đoạn tìm được": every retrieved chunk, also when the answer was "not found".
+  function addChunks(t, chunks) {
+    t.chunks.textContent = "";
+    t.chunks.hidden = !chunks.length;
+    if (!chunks.length) return;
+    t.chunks.appendChild(el("summary", null, "Đoạn tìm được (" + chunks.length + ")"));
+    chunks.forEach(function (c, i) {
+      var box = el("div", "chunk");
+      box.appendChild(el("p", "meta", "[" + (i + 1) + "] " + c.title + " v" + c.version + " · tr." + c.page + " · " + Number(c.score).toFixed(3)));
+      box.appendChild(el("pre", null, c.content));
+      t.chunks.appendChild(box);
+    });
   }
 
   function renderTurn(turn, index) {
@@ -139,7 +170,7 @@
           c.turns.every(function (t) {
             return t && typeof t === "object" && typeof t.q === "string" && typeof t.found === "boolean" && Array.isArray(t.sources) && (!t.found || typeof t.a === "string");
           });
-      }).map(function (c) { c.updatedAt = Number(c.updatedAt) || 0; return c; }); // a conversation with any bad turn is dropped whole
+      }).map(function (c) { c.updatedAt = Number(c.updatedAt) || 0; c.tenant = tenantOf(c); return c; }); // a conversation with any bad turn is dropped whole
     } catch (e) { return []; }
   }
 
@@ -162,7 +193,7 @@
   function onTurnDone(turn) {
     var chats = loadChats(), c = chats.filter(function (x) { return x.id === current.id; })[0];
     if (!c) {
-      c = { id: current.id, title: turn.q.slice(0, 60), updatedAt: 0, turns: [] };
+      c = { id: current.id, tenant: current.tenant, title: turn.q.slice(0, 60), updatedAt: 0, turns: [] };
       chats.push(c);
     }
     c.turns.push(turn);
@@ -173,7 +204,7 @@
 
   function renderSidebar() {
     list.textContent = "";
-    loadChats().sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); }).forEach(function (c) {
+    loadChats().filter(function (c) { return tenantOf(c) === tenant(); }).sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); }).forEach(function (c) {
       var li = el("li"), open = el("button", "chat-item", c.title), del = el("button", "chat-del", "×");
       open.type = del.type = "button";
       open.title = c.title;
@@ -192,7 +223,7 @@
     if (!c) return renderSidebar();
     if (ctrl) ctrl.abort();
     ctrl = null;
-    current = { id: c.id, turns: c.turns.slice() };
+    current = { id: c.id, tenant: tenantOf(c), turns: c.turns.slice() };
     chat.textContent = "";
     unlock();
     renderSidebar();
@@ -208,7 +239,7 @@
   function startNewChat() {
     if (ctrl) ctrl.abort();
     ctrl = null;
-    current = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), turns: [] };
+    current = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), tenant: tenant(), turns: [] };
     chat.textContent = "";
     unlock();
     renderSidebar();
@@ -216,9 +247,41 @@
 
   function unlock() { input.disabled = go.disabled = false; input.focus(); }
 
+  function checkedIds() {
+    return Array.prototype.map.call(scope.querySelectorAll("input[type=checkbox]:checked"), function (b) { return Number(b.value); });
+  }
+
+  // Loads the current documents of the selected tenant as checkboxes (all checked); a late response for another tenant is dropped.
+  function loadScope() {
+    var seq = ++scopeSeq, t = tenant();
+    scope.textContent = "";
+    scopeMsg.hidden = true;
+    scope.appendChild(el("p", "meta", "Đang tải danh sách tài liệu…"));
+    fetch("/api/documents?current=true", { headers: { "X-Tenant-Id": t } })
+      .then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
+      .then(function (data) {
+        if (seq !== scopeSeq) return;
+        scope.textContent = "";
+        var docs = data.documents || [];
+        if (!docs.length) return scope.appendChild(el("p", "meta", "Tenant này chưa có tài liệu nào."));
+        docs.forEach(function (d) {
+          var label = el("label", "scope-doc"), box = el("input");
+          box.type = "checkbox"; box.value = d.id; box.checked = true;
+          label.appendChild(box);
+          label.appendChild(document.createTextNode(" " + d.title + " (v" + d.version + ")"));
+          scope.appendChild(label);
+        });
+      })
+      .catch(function () {
+        if (seq !== scopeSeq) return;
+        scope.textContent = "";
+        scope.appendChild(el("p", "meta", "Không tải được danh sách tài liệu."));
+      });
+  }
+
   function sendQuestion(q) {
     if (ctrl) ctrl.abort(); // never leave an orphan pending turn
-    var idx = current.turns.length, conv = current, mine = ctrl = new AbortController(), t = buildTurn(q), acc = "", done = null, failed = false;
+    var ids = checkedIds(), idx = current.turns.length, conv = current, mine = ctrl = new AbortController(), t = buildTurn(q), acc = "", done = null, failed = false;
     var history = conv.turns.slice(-3).map(function (x) { return { q: x.q.slice(0, 1000), a: (x.found ? x.a : NOT_FOUND).slice(0, 2000) }; });
     input.disabled = go.disabled = true;
     t.ans.setAttribute("aria-live", "polite");
@@ -231,7 +294,7 @@
       else if (name === "error") failed = true;
     }
 
-    fetch("/ask", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ q: q, history: history }), signal: mine.signal })
+    fetch("/ask", { method: "POST", headers: { "content-type": "application/json", "X-Tenant-Id": conv.tenant }, body: JSON.stringify({ q: q, history: history, document_ids: ids }), signal: mine.signal })
       .then(function (res) {
         if (!res.ok) throw new Error("HTTP " + res.status);
         var reader = res.body.getReader(), dec = new TextDecoder(), buf = "";
@@ -256,7 +319,7 @@
       .then(function () {
         if (mine !== ctrl) return; // aborted by New chat
         if (failed || !done) throw new Error("no done");
-        var turn = { q: q, a: done.found ? done.text : "", found: !!done.found, sources: done.sources || [], standalone: done.standalone };
+        var turn = { q: q, a: done.found ? done.text : "", found: !!done.found, sources: done.sources || [], standalone: done.standalone, chunks: done.chunks || [] };
         fillTurn(t, turn, idx);
         conv.turns.push(turn);
         try { onTurnDone(turn); } catch (e) { /* persistence must not turn a good answer into an error */ }
@@ -279,11 +342,24 @@
     ev.preventDefault();
     var q = input.value.trim();
     if (!q || go.disabled) return;
+    if (!checkedIds().length) { scopeMsg.textContent = "Chọn ít nhất một tài liệu."; scopeMsg.hidden = false; return; } // never send [] (= all documents)
+    scopeMsg.hidden = true;
     input.value = "";
     sendQuestion(q);
   });
   newChat.addEventListener("click", startNewChat);
   if (window.matchMedia && matchMedia("(max-width: 48rem)").matches) document.getElementById("sidebar").open = false;
+  scope.addEventListener("change", function () { scopeMsg.hidden = true; });
+  tenantSel.addEventListener("change", function () {
+    try { localStorage.setItem(TENANT_KEY, tenant()); } catch (e) { /* storage unusable */ }
+    startNewChat(); // aborts any stream; one conversation never mixes tenants
+    loadScope();
+  });
+  try {
+    var saved = localStorage.getItem(TENANT_KEY);
+    if (saved && Array.prototype.some.call(tenantSel.options, function (o) { return o.value === saved; })) tenantSel.value = saved;
+  } catch (e) { /* storage unusable */ }
   startNewChat();
+  loadScope();
 })();
 </script>
