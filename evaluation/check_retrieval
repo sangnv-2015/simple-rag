@@ -6,15 +6,23 @@ require "yaml"
 store = Rag::Store.new(ENV.fetch("DATABASE_URL"))
 store.migrate!
 embedder = Rag::Embedder.new
-qs = YAML.load_file(File.expand_path("questions.yml", __dir__)).select { |q| q["answerable"] && !q["after_upload"] }
+all = YAML.load_file(File.expand_path("questions.yml", __dir__)).reject { |q| q["after_upload"] }
+qs = all.select { |q| q["answerable"] }
 abort "Không có câu hỏi nào để kiểm tra." if qs.empty?
 hits_found = 0
-qs.each do |q|
-  hits = store.search(embedder.embed_query(q["question"]), Rag::TOP_K, tenant_id: Rag::DEFAULT_TENANT)
+top1 = {true => [], false => []} # answerable => top-1 scores, for calibrating min_score
+all.each do |q|
+  hits = store.search(embedder.embed_query(q["question"]), Rag::TOP_K, tenant_id: q["tenant"] || Rag::DEFAULT_TENANT)
+  top1[q["answerable"]] << hits[0].score if hits[0]
+  score = hits[0] ? format("%.3f", hits[0].score) : "-"
+  unless q["answerable"]
+    puts "n/a   score=#{score} #{q["question"]}"
+    next
+  end
   rank = hits.index { |h| h.filename == q["file"] && Rag::Text.squash(h.text).include?(Rag::Text.squash(q["contains"])) }
   hits_found += 1 if rank
-  puts "#{rank ? rank + 1 : "MISS"} #{q["question"]}"
+  puts "#{rank ? rank + 1 : "MISS"} score=#{score} #{q["question"]}"
   puts "    top-1: #{hits[0].filename} trang #{hits[0].page}" if !rank && hits[0]
 end
-puts "#{hits_found}/#{qs.size} in top 6"
+puts "answerable top-1 min=#{format("%.3f", top1[true].min)} | unanswerable top-1 max=#{format("%.3f", top1[false].max || 0)} | in top 6: #{hits_found}/#{qs.size}"
 exit(hits_found.to_f / qs.size < 0.8 ? 1 : 0)

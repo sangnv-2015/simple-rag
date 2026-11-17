@@ -1,0 +1,85 @@
+#!/usr/bin/env ruby
+# Runs TC1-TC7 against the live API (web container must be up). Exit 1 on any FAIL.
+require "net/http"
+require "json"
+require "yaml"
+
+BASE = URI(ENV.fetch("BASE", "http://app:4567"))
+QS = YAML.load_file(File.expand_path("questions.yml", __dir__))
+
+def call(path, tenant, body = nil)
+  req = body ? Net::HTTP::Post.new(path, "content-type" => "application/json") : Net::HTTP::Get.new(path)
+  req["Host"] = "localhost:4567" # the app's host check only permits localhost names
+  req["X-Tenant-Id"] = tenant
+  req.body = JSON.generate(body) if body
+  res = Net::HTTP.start(BASE.host, BASE.port, read_timeout: 120) { |h| h.request(req) }
+  raise "#{path} -> #{res.code} #{res.body}" unless res.code == "200"
+  JSON.parse(res.body)
+end
+
+def squash(s) = s.to_s.gsub(/\s+/, " ").strip.downcase
+def tagged(tc, nth = 0) = QS.select { |q| q["tc"]&.include?(tc) }[nth] || raise("no question tagged #{tc}")
+def search(q, tenant, ids = []) = call("/api/search", tenant, question: q, document_ids: ids, top_k: 6)["chunks"]
+def ask(q, tenant, ids = []) = call("/api/ask", tenant, question: q, document_ids: ids)
+def docs(tenant) = call("/api/documents", tenant)["documents"]
+def right?(chunk, q) = squash(chunk["content"]).include?(squash(q["contains"]))
+def snippet(c) = "#{c["title"]} v#{c["version"]} p#{c["page"]} #{c["score"]} #{c["content"].tr("\n", " ")[0, 60]}"
+
+CHECKS = {
+  "TC1" => lambda {
+    q = tagged("TC1")
+    right = search(q["question"], "nus").select { |c| right?(c, q) }
+    a = ask(q["question"], "nus")
+    cited = a["citations"].any? { |c| right.any? { |r| r["chunk_id"] == c["chunk_id"] } }
+    [!right.empty? && a["status"] == "answered" && cited, "right chunk in top 6: #{!right.empty?}, status=#{a["status"]}, cites it: #{cited}"]
+  },
+  "TC2" => lambda {
+    q = tagged("TC2")
+    top = search(q["question"], "nus").first(3)
+    puts top.each_with_index.map { |c, i| "    ##{i + 1} #{snippet(c)}" }
+    [top.any? { |c| right?(c, q) }, "right chunk in top 3: #{top.any? { |c| right?(c, q) }}"]
+  },
+  "TC3" => lambda {
+    a = ask(tagged("TC3")["question"], "nus")
+    [a["status"] == "not_enough_information" && a["citations"].empty?, "status=#{a["status"]}, citations=#{a["citations"].size}"]
+  },
+  "TC4" => lambda {
+    q = tagged("TC4")
+    expired = docs("nus").reject { |d| d["status"] == "done" && call("/api/documents?current=true", "nus")["documents"].any? { |c| c["id"] == d["id"] } }.map { |d| d["id"] }
+    ids = (search(q["question"], "nus") + ask(q["question"], "nus")["chunks"]).map { |c| c["document_id"] }
+    [!expired.empty? && (ids & expired).empty?, "expired document ids=#{expired}, ids seen=#{ids.uniq}"]
+  },
+  "TC5" => lambda {
+    nq, aq = tagged("TC5", 0), tagged("TC5", 1)
+    acme_ids = docs("acme").map { |d| d["id"] }
+    acme = search(aq["question"], "acme")
+    nus = search(aq["question"], "nus")
+    ok = !acme.empty? && acme.all? { |c| acme_ids.include?(c["document_id"]) } && nus.none? { |c| acme_ids.include?(c["document_id"]) } && !nus.empty?
+    [ok && acme.any? { |c| right?(c, aq) } && nus.any? { |c| right?(c, nq) }, "acme ids=#{acme_ids}, acme results=#{acme.map { |c| c["document_id"] }.uniq}, nus results=#{nus.map { |c| c["document_id"] }.uniq}"]
+  },
+  "TC6" => lambda {
+    q = tagged("TC6")
+    sel = docs("nus").select { |d| q["select"].include?(d["filename"]) }.map { |d| d["id"] }
+    seen = (search(q["question"], "nus", sel) + ask(q["question"], "nus", sel)["chunks"]).map { |c| c["document_id"] }.uniq
+    [!seen.empty? && (seen - sel).empty?, "selected=#{sel}, ids seen=#{seen}"]
+  },
+  "TC7" => lambda {
+    a = ask(tagged("TC7")["question"], "nus")
+    by_id = a["chunks"].to_h { |c| [c["chunk_id"], c] }
+    bad = a["citations"].reject { |c| by_id[c["chunk_id"]] && !squash(c["quote"]).empty? && squash(by_id[c["chunk_id"]]["content"]).include?(squash(c["quote"])) }
+    [a["status"] == "answered" && !a["citations"].empty? && bad.empty?, "status=#{a["status"]}, citations=#{a["citations"].size}, unverified=#{bad.size}"]
+  }
+}
+
+failed = false
+puts "TC | PASS/FAIL | detail"
+CHECKS.each do |tc, check|
+  ok, detail = check.call
+  failed ||= !ok
+  puts "#{tc} | #{ok ? "PASS" : "FAIL"} | #{detail}"
+rescue => e
+  failed = true
+  puts "#{tc} | FAIL | #{e.class}: #{e.message[0, 200]}"
+end
+puts "TC8 manual (see README)"
+exit(failed ? 1 : 0)

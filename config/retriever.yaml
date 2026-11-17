@@ -8,7 +8,7 @@ max_pages: 200 # every readable page is one paid model call
 max_page_chars: 20000
 max_upload_mb: 30
 chunking: semantic
-min_score: 0.0 # placeholder, calibrated against real queries
+min_score: 0.84 # midpoint of unanswerable top-1 max 0.832 and answerable top-1 min 0.851 (evaluation/check_retrieval)
 semantic_breakpoint_percentile: 25
 semantic_floor: 0.85
 semantic_min_units: 5

@@ -1,0 +1,34 @@
+#!/usr/bin/env ruby
+# Chunks the default tenant's current documents in memory with both strategies (no DB writes) and ranks by cosine.
+$LOAD_PATH.unshift(File.expand_path("../src", __dir__))
+require "rag"
+require "yaml"
+
+store = Rag::Store.new(ENV.fetch("DATABASE_URL"))
+store.migrate!
+embedder = Rag::Embedder.new
+embed = ->(texts) { embedder.embed_passages(texts) }
+cos = ->(a, b) { a.zip(b).sum { |x, y| x * y } } # embeddings are normalised
+qs = YAML.load_file(File.expand_path("questions.yml", __dir__)).select { |q| q["answerable"] && !q["after_upload"] && (q["tenant"] || Rag::DEFAULT_TENANT) == Rag::DEFAULT_TENANT }
+docs = store.documents(tenant_id: Rag::DEFAULT_TENANT).select(&:current?)
+texts = docs.to_h { |d| [d, store.pages(d.id).select(&:readable).map { |p| [p.number, p.fallback ? p.raw_text : p.markdown] }] }
+
+strategies = {
+  "structure" => ->(t) { Rag::Chunker.split(t) },
+  "semantic" => ->(t) { Rag::SemanticChunker.split(t, embed: embed) }
+}
+rows = strategies.map do |name, split|
+  chunks = texts.flat_map { |d, pages| pages.flat_map { |_, t| split.call(t).map { |c| [d.filename, c] } } }
+  vecs = embed.call(chunks.map { |_, c| c })
+  ranks = qs.map do |q|
+    qv = embedder.embed_query(q["question"])
+    order = chunks.each_index.sort_by { |i| -cos.call(qv, vecs[i]) }
+    order.first(Rag::TOP_K).index { |i| chunks[i][0] == q["file"] && Rag::Text.squash(chunks[i][1]).include?(Rag::Text.squash(q["contains"])) }
+  end
+  [name, chunks.size, chunks.sum { |_, c| c.size } / chunks.size, ranks]
+end
+
+puts "| strategy | chunks | avg chars | hit@#{Rag::TOP_K} | rank of right chunk per question |", "|---|---|---|---|---|"
+rows.each do |name, n, avg, ranks|
+  puts "| #{name} | #{n} | #{avg} | #{ranks.compact.size}/#{qs.size} | #{ranks.map { |r| r ? r + 1 : "miss" }.join(", ")} |"
+end
