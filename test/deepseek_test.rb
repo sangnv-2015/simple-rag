@@ -125,6 +125,99 @@ class DeepSeekTest < Minitest::Test
     end
   end
 
+  INVALID = "DeepSeek trả về dữ liệu không hợp lệ".freeze
+
+  def run_chat(handler, key: "k", **opts, &blk)
+    err = nil
+    stderr = capture_stderr do
+      FakeSSEServer.start(handler) do |url|
+        @url = url
+        err = assert_raises(Rag::DeepSeek::Error) { Rag::DeepSeek.new(api_key: key, base_url: url, **opts).chat(MSGS, &blk) }
+      end
+    end.last
+    [err, stderr]
+  end
+
+  def test_http_error_body_is_redacted_of_key_and_url_before_truncation
+    key = "sk-live-DISTINCT123"
+    base = nil
+    handler = ->(_) { [401, [%({"error":"bad #{key}","url":"#{base}","h":"Bearer #{key}"})]] }
+    err = nil
+    stderr = capture_stderr do
+      FakeSSEServer.start(handler) do |url|
+        base = url
+        err = assert_raises(Rag::DeepSeek::Error) { Rag::DeepSeek.new(api_key: key, base_url: url).chat(MSGS) }
+      end
+    end.last
+    refute_includes stderr, key
+    refute_includes stderr, base
+    refute_includes stderr, "127.0.0.1"
+    assert_includes stderr, "401"
+    refute_includes err.message, key
+  end
+
+  def test_http_error_body_truncated_to_300_chars
+    _, stderr = run_chat(->(_) { [500, ["a" * 500]] })
+    assert_includes stderr, "a" * 300
+    refute_includes stderr, "a" * 301
+  end
+
+  def test_key_split_by_truncation_boundary_is_not_leaked
+    key = "sk-live-BOUNDARY"
+    _, stderr = run_chat(->(_) { [400, ["b" * 295 + key]] }, key: key)
+    refute_includes stderr, "sk-li"
+  end
+
+  def test_error_event_in_stream_raises_after_partial_and_logs_redacted
+    got = []
+    err, stderr = run_chat(->(_) { [200, sse(delta("a"), '{"error":{"message":"boom sekret-k"}}', "[DONE]")] }, key: "sekret-k") { |d| got << d }
+    assert_equal ["a"], got
+    assert_equal INVALID, err.message
+    assert_includes stderr, "boom"
+    refute_includes stderr, "sekret-k"
+  end
+
+  def test_error_key_in_non_stream_200_raises_invalid
+    err, = run_chat(->(_) { [200, ['{"error":{"message":"x"}}']] })
+    assert_equal INVALID, err.message
+  end
+
+  def test_non_json_2xx_body_raises_invalid
+    err, = run_chat(->(_) { [200, ["<html>nope</html>"]] })
+    assert_equal INVALID, err.message
+  end
+
+  def test_wrong_shape_non_stream_bodies_raise_invalid
+    ["null", "[]", '{"choices":["x"]}', '{"choices":[{"message":"x"}]}'].each do |body|
+      err, = run_chat(->(_) { [200, [body]] })
+      assert_equal INVALID, err.message, body
+    end
+  end
+
+  def test_wrong_shape_stream_events_are_skipped
+    chunks = sse("null", "[]", '{"choices":["x"]}', '{"choices":[{"delta":"x"}]}',
+                 {choices: [{delta: {content: 5}}]}.to_json, delta("ok"), "[DONE]")
+    FakeSSEServer.start(->(_) { [200, chunks] }) do |url|
+      got = []
+      Rag::DeepSeek.new(api_key: "k", base_url: url).chat(MSGS) { |d| got << d }
+      assert_equal ["ok"], got
+    end
+  end
+
+  def test_exception_from_caller_block_passes_through_unchanged
+    FakeSSEServer.start(->(_) { [200, sse(delta("a"), delta("b"), "[DONE]")] }) do |url|
+      e = assert_raises(IOError) do
+        Rag::DeepSeek.new(api_key: "k", base_url: url).chat(MSGS) { |_| raise IOError, "closed" }
+      end
+      assert_equal "closed", e.message
+    end
+  end
+
+  def test_read_timeout_maps_to_fixed_error
+    err, = run_chat(->(_) { sleep 0.6; [200, ["{}"]] }, read_timeout: 0.2)
+    assert_equal "Không kết nối được DeepSeek", err.message
+  end
+
   private
 
   def capture_stderr

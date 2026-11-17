@@ -2,6 +2,8 @@ require "net/http"
 require "json"
 require "uri"
 require "openssl"
+require "timeout"
+require "zlib"
 
 module Rag
   # Chat client for an OpenAI-compatible gateway. Error messages are fixed strings: they never carry
@@ -9,8 +11,8 @@ module Rag
   class DeepSeek
     class Error < Rag::Error; end
 
-    NETWORK_ERRORS = [SocketError, SystemCallError, Net::OpenTimeout, Net::ReadTimeout, EOFError, IOError,
-                      OpenSSL::SSL::SSLError, URI::InvalidURIError].freeze
+    NETWORK_ERRORS = [SocketError, SystemCallError, Timeout::Error, EOFError, IOError, OpenSSL::SSL::SSLError,
+                      URI::InvalidURIError, Net::HTTPBadResponse, Zlib::Error].freeze
 
     def initialize(api_key:, base_url:, model: "deepseek-flash", read_timeout: 120)
       @api_key = api_key
@@ -23,6 +25,16 @@ module Rag
       body = {model: @model, messages: messages, reasoning: {enabled: false}, temperature: 0}
       body[:stream] = true if on_delta
       started = false
+      callback_error = nil
+      if on_delta
+        user_block = on_delta
+        on_delta = lambda do |t|
+          user_block.call(t)
+        rescue StandardError => e
+          callback_error = e
+          raise
+        end
+      end
       begin
         uri = URI.parse(@base_url.chomp("/") + "/chat/completions")
         raise URI::InvalidURIError, "no host" unless uri.is_a?(URI::HTTP) && uri.host
@@ -39,6 +51,8 @@ module Rag
           return handle(res, &on_delta)
         end
       rescue *NETWORK_ERRORS => e
+        raise callback_error if callback_error # the caller's own exception, not a network failure
+
         warn "DeepSeek request failed: #{e.class}"
         raise Error, started ? "DeepSeek ngắt kết nối giữa chừng" : "Không kết nối được DeepSeek"
       end
@@ -48,17 +62,35 @@ module Rag
 
     def handle(res, &on_delta)
       unless res.is_a?(Net::HTTPSuccess)
-        warn "DeepSeek HTTP #{res.code}: #{res.read_body.to_s[0, 300]}"
+        warn "DeepSeek HTTP #{res.code}: #{redact(res.read_body)}"
         raise Error, "Không gọi được DeepSeek (HTTP #{res.code})"
       end
       return stream(res, &on_delta) if on_delta
 
-      JSON.parse(res.read_body).dig("choices", 0, "message", "content").to_s
+      raw = res.read_body
+      parsed = JSON.parse(raw)
+      fail_invalid(raw) if parsed.is_a?(Hash) && parsed.key?("error")
+      choice = parsed.is_a?(Hash) && parsed["choices"].is_a?(Array) ? parsed["choices"][0] : nil
+      message = choice.is_a?(Hash) ? choice["message"] : nil
+      fail_invalid(raw) unless message.is_a?(Hash)
+      message["content"].is_a?(String) ? message["content"] : ""
     rescue JSON::ParserError
       raise Error, "DeepSeek trả về dữ liệu không hợp lệ"
     end
 
-    def stream(res)
+    def fail_invalid(raw)
+      warn "DeepSeek invalid response: #{redact(raw)}"
+      raise Error, "DeepSeek trả về dữ liệu không hợp lệ"
+    end
+
+    # Redact before truncating so a secret cannot be cut in half and slip past.
+    def redact(text)
+      host = (URI.parse(@base_url).host rescue nil)
+      [@api_key, @base_url, @base_url.chomp("/"), host].compact.reject(&:empty?).uniq
+        .sort_by { |x| -x.size }.reduce(text.to_s.dup) { |t, secret| t.gsub(secret, "[redacted]") }[0, 300]
+    end
+
+    def stream(res, &on_delta)
       out = +""
       buffer = +""
       done = false
@@ -75,15 +107,21 @@ module Rag
             done = true
             break
           end
-          text = begin
-            JSON.parse(data).dig("choices", 0, "delta", "content")
+          event = begin
+            JSON.parse(data)
           rescue JSON::ParserError
-            nil
+            next
           end
-          next if text.nil? || text.empty?
+          next unless event.is_a?(Hash)
+          fail_invalid(data) if event.key?("error")
+
+          choice = event["choices"].is_a?(Array) ? event["choices"][0] : nil
+          delta = choice.is_a?(Hash) ? choice["delta"] : nil
+          text = delta.is_a?(Hash) ? delta["content"] : nil
+          next unless text.is_a?(String) && !text.empty?
 
           out << text
-          yield text
+          on_delta.call(text)
         end
       end
       raise Error, "DeepSeek ngắt kết nối giữa chừng" unless done
