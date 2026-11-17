@@ -71,7 +71,7 @@ class DeepSeekTest < Minitest::Test
     err = nil
     _, stderr = capture_stderr do
       FakeSSEServer.start(->(_) { [401, ["secret-key-echo"]] }) do |url|
-        err = assert_raises(Rag::DeepSeek::Error) { Rag::DeepSeek.new(api_key: "k", base_url: url).chat(MSGS) }
+        err = assert_raises(Rag::DeepSeek::Error) { Rag::DeepSeek.new(api_key: "sk-test-1", base_url: url).chat(MSGS) }
       end
     end
     assert_equal "Không gọi được DeepSeek (HTTP 401)", err.message
