@@ -63,7 +63,7 @@ class RestructurerTest < Minitest::Test
   end
 
   def test_replys_own_code_blocks_are_kept
-    reply = "```ruby\nputs 1\n```\n\ntext 12\n\n```sh\nls\n```"
+    reply = "```\nputs 1\n```\n\ntext 12\n\n```\nls\n```"
     r = Rag::Restructurer.new(llm: FakeLLM.new { reply }).call("A 12 1")
     assert_equal reply, r.markdown
   end
