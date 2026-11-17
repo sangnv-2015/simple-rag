@@ -1,4 +1,5 @@
 require "test_helper"
+require "pp"
 
 class ConfigTest < Minitest::Test
   def test_missing_key_and_base_are_named_in_message
@@ -25,5 +26,20 @@ class ConfigTest < Minitest::Test
     refute_includes c.inspect, "sekret-123"
     refute_includes c.to_s, "sekret-123"
     refute_includes c.inspect, "host.example"
+    refute_includes c.pretty_inspect, "sekret-123"
+    refute_includes c.pretty_inspect, "host.example"
+  end
+
+  def test_model_and_documents_dir_set_or_blank
+    base = {"DEEPSEEK_API_KEY" => "k", "DEEPSEEK_API_BASE" => "http://x"}
+    c = Rag::Config.from_env(base.merge("DEEPSEEK_MODEL" => "m1", "DOCUMENTS_DIR" => "/d"))
+    assert_equal ["m1", "/d"], [c.model, c.documents_dir]
+    c = Rag::Config.from_env(base.merge("DEEPSEEK_MODEL" => " ", "DOCUMENTS_DIR" => " "))
+    assert_equal "deepseek-flash", c.model
+    assert c.documents_dir.end_with?("documents")
+  end
+
+  def test_no_stray_required_constant
+    refute Rag.const_defined?(:REQUIRED)
   end
 end

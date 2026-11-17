@@ -21,6 +21,10 @@ module Rag
       @read_timeout = read_timeout
     end
 
+    # Default inspect/pp would print @api_key and @base_url (also via Ingest/Ask/System ivars).
+    def inspect = "#<Rag::DeepSeek model=#{@model.inspect}>"
+    def pretty_print(q) = q.text(inspect)
+
     def chat(messages, &on_delta)
       body = {model: @model, messages: messages, reasoning: {enabled: false}, temperature: 0}
       body[:stream] = true if on_delta

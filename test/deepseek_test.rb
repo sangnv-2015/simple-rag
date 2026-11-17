@@ -1,10 +1,23 @@
 require "test_helper"
 require "stringio"
+require "pp"
 
 class DeepSeekTest < Minitest::Test
   MSGS = [{role: "user", content: "hi"}].freeze
 
   def sse(*events) = events.map { |e| "data: #{e}\n\n" }
+  def test_inspect_and_pretty_inspect_never_show_key_or_host
+    llm = Rag::DeepSeek.new(api_key: "sekret-123", base_url: "https://host.example/v1")
+    objs = [llm, Rag::Ingest.new(llm: llm, embedder: Object.new, store: Object.new),
+            Rag::Ask.new(llm: llm, embedder: Object.new, store: Object.new)]
+    objs.each do |o|
+      [o.inspect, o.pretty_inspect].each do |t|
+        refute_includes t, "sekret-123"
+        refute_includes t, "host.example"
+      end
+    end
+  end
+
   def delta(text) = {choices: [{delta: {content: text}}]}.to_json
 
   def test_non_stream_returns_content_and_sends_expected_request

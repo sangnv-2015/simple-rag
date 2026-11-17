@@ -45,3 +45,4 @@ Check [4] was loosened by controller ruling from ">=2 spaces" to a same-line mat
     ```
     quote verified (table row kept as markdown cells).
   - Unanswerable "Công ty thưởng Tết bao nhiêu tháng lương?" (3.1 s / 3.5 s) and "Does the company pay for employees' gym memberships?" (3.3 s / 3.6 s): terminal shows only `Không tìm thấy thông tin này trong tài liệu.` (the model answered NOT_FOUND, nothing was streamed).
+- `bin/check_retrieval` re-run after requiring the hit to come from the question's own file: ranks 1,1,1,2,1,1,1,1,1,1, score **10/10 in top 6** (unchanged).

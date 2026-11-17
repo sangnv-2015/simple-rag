@@ -3,6 +3,11 @@ $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 require "rag"
 
 $stdout.sync = true
+question = ARGV.join(" ")
+if question.strip.empty?
+  warn 'Cách dùng: bin/ask "câu hỏi"'
+  exit 2
+end
 begin
   sys = Rag.build
 rescue Rag::ConfigError => e
@@ -10,7 +15,13 @@ rescue Rag::ConfigError => e
   exit 2
 end
 streamed = false
-answer = sys.ask.call(ARGV.join(" ")) { |d| streamed = true; print d }
+begin
+  answer = sys.ask.call(question) { |d| streamed = true; print d }
+rescue Rag::Error => e
+  puts if streamed
+  warn e.message
+  exit 1
+end
 if answer.found
   puts
   answer.sources.each do |s|

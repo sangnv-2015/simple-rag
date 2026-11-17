@@ -2,17 +2,20 @@ module Rag
   class ConfigError < Error; end
 
   Config = Struct.new(:api_key, :api_base, :model, :database_url, :documents_dir) do
-    REQUIRED = { "DEEPSEEK_API_KEY" => :api_key, "DEEPSEEK_API_BASE" => :api_base }.freeze
-
     def self.from_env(env = ENV)
-      missing = REQUIRED.keys.select { |k| env[k].to_s.strip.empty? }
+      missing = %w[DEEPSEEK_API_KEY DEEPSEEK_API_BASE].select { |k| env[k].to_s.strip.empty? }
       raise ConfigError, "Thiếu biến môi trường: #{missing.join(", ")}. Hãy điền trong file .env (xem .env.example)." unless missing.empty?
-      new(env["DEEPSEEK_API_KEY"], env["DEEPSEEK_API_BASE"], env["DEEPSEEK_MODEL"].to_s.strip.then { |m| m.empty? ? "deepseek-flash" : m },
-          env["DATABASE_URL"], env["DOCUMENTS_DIR"] || File.expand_path("../../documents", __dir__))
+      new(env["DEEPSEEK_API_KEY"], env["DEEPSEEK_API_BASE"], presence(env["DEEPSEEK_MODEL"]) || "deepseek-flash",
+          env["DATABASE_URL"], presence(env["DOCUMENTS_DIR"]) || File.expand_path("../../documents", __dir__))
+    end
+
+    def self.presence(v)
+      v.to_s.strip.empty? ? nil : v
     end
 
     def inspect = "#<Rag::Config model=#{model.inspect} documents_dir=#{documents_dir.inspect}>"
     alias_method :to_s, :inspect
+    def pretty_print(q) = q.text(inspect) # pp ignores inspect on Structs
   end
 
   System = Struct.new(:config, :store, :ingest, :ask)

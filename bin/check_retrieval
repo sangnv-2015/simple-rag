@@ -7,10 +7,11 @@ store = Rag::Store.new(ENV.fetch("DATABASE_URL"))
 store.migrate!
 embedder = Rag::Embedder.new
 qs = YAML.load_file(File.expand_path("../samples/questions.yml", __dir__)).select { |q| q["answerable"] && !q["after_upload"] }
+abort "Không có câu hỏi nào để kiểm tra." if qs.empty?
 hits_found = 0
 qs.each do |q|
   hits = store.search(embedder.embed_query(q["question"]), Rag::TOP_K)
-  rank = hits.index { |h| Rag::Text.squash(h.text).include?(Rag::Text.squash(q["contains"])) }
+  rank = hits.index { |h| h.filename == q["file"] && Rag::Text.squash(h.text).include?(Rag::Text.squash(q["contains"])) }
   hits_found += 1 if rank
   puts "#{rank ? rank + 1 : "MISS"} #{q["question"]}"
   puts "    top-1: #{hits[0].filename} trang #{hits[0].page}" if !rank && hits[0]
