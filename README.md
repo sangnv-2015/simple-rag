@@ -86,10 +86,15 @@ Chất lượng câu trả lời không được đánh giá tự động: hãy 
 ```bash
 docker compose run --rm app bin/test                 # chạy toàn bộ test (không gọi DeepSeek, không tải mô hình)
 docker compose run --rm app bin/ask "câu hỏi"        # dùng lõi không qua web (có gọi DeepSeek)
-docker compose run --rm app bin/build_samples        # tạo lại file mẫu từ samples/src
 ```
 
-`bin/build_samples` là nguồn của `documents/` và `samples/upload-demo/`: không sửa tay các file đó. Mã nguồn được mount vào container nên sửa là có hiệu lực khi chạy lại lệnh; riêng web cần `docker compose restart app`.
+Container chạy bằng người dùng thường (`app`, uid 1000) và mã nguồn được mount CHỈ ĐỌC (`.:/app:ro`); chỉ `documents/` (file tải lên) và cache mô hình `/cache` ghi được. Sửa mã trên máy vẫn có hiệu lực khi chạy lại lệnh; riêng web cần `docker compose restart app`. Lệnh cần ghi vào repo (tạo lại file mẫu, cập nhật `Gemfile.lock`, các script trong `spikes/`) phải chạy một lần với mount ghi được. Lưu ý: `docker compose run -v` KHÔNG ghi đè được mount chỉ đọc, nên dùng `docker run` với image `app` đã build (không có cơ sở dữ liệu, đủ cho các lệnh này):
+
+```bash
+docker run --rm -v "$PWD:/app" -w /app app bin/build_samples   # tạo lại file mẫu từ samples/src
+```
+
+`bin/build_samples` là nguồn của `documents/` và `samples/upload-demo/`: không sửa tay các file đó. Tạo lại file mẫu làm đổi sha256, nên lần `bin/ingest` sau sẽ nạp lại (tốn lệnh gọi trả phí).
 
 ## 6. Xử lý sự cố
 
@@ -113,6 +118,7 @@ docker compose run --rm app bin/build_samples        # tạo lại file mẫu t�
 - Đoạn trích hiển thị đã được kiểm tra khớp từng chữ với đoạn được dẫn. Nguồn nào không xác minh được đoạn trích thì hiển thị `không xác minh được đoạn trích`.
 - File không phải Word nhưng đổi đuôi thành `.docx` và bắt đầu bằng chữ ký zip có thể bị nạp thành chữ rác.
 - Tải lên tối đa 30 MB, chỉ `.pdf` và `.docx`.
+- Mỗi tài liệu tối đa 200 trang (mỗi trang đọc được là một lệnh gọi trả phí); quá 200 trang thì báo lỗi `Tài liệu quá dài (tối đa 200 trang).` trước khi gọi mô hình. Trang dài hơn 20.000 ký tự không được gửi đi dựng lại: giữ nguyên chữ gốc (trang tài liệu vẫn hiện nhãn `Đã dùng chữ gốc vì markdown thiếu số liệu`, dù lý do ở đây là trang quá dài).
 - Tài liệu đang xử lý mà app khởi động lại sẽ hiện là bị gián đoạn: phải tải lên lại hoặc nạp lại.
 - Đổi mô hình tạo vector phải xóa dữ liệu và nạp lại.
 
@@ -144,5 +150,15 @@ Thay thế:
 - Giữ nguyên bước kiểm tra đoạn trích và kiểm tra con số: đó là thứ làm cho câu trả lời đáng tin.
 
 Phụ thuộc: gem `informers` (mô hình `Xenova/multilingual-e5-small`), `pg`, `pgvector` (chỉ khi dùng `Rag::Store`); gói hệ thống `poppler-utils` (rút chữ PDF), LibreOffice Writer (`libreoffice-writer-nogui`) cùng font `fonts-noto-core` và `fonts-liberation2` (để dấu tiếng Việt đúng khi đổi `.docx` sang PDF; chỉ cần cho `.docx`); và Ruby 3.4. Xem `Dockerfile` và `Gemfile`.
+
+Trước khi đưa vào môi trường thật:
+
+- Chạy bước chuyển tài liệu (LibreOffice, pdftotext) trong sandbox không có mạng; tài liệu độc hại có thể làm LibreOffice truy cập mạng (demo đã chặn ảnh liên kết ngoài, nhưng sandbox mới là lớp chắn đúng).
+- Thêm đăng nhập, và giới hạn mọi truy vấn của store theo chủ sở hữu tài liệu.
+- Lưu file tải lên dưới tên do hệ thống tự sinh (id), không dùng tên file của người dùng.
+- Đổi việc hỏi thành POST, có kiểm tra origin, giới hạn tần suất và ngân sách chi phí (hiện `GET /ask` mỗi lần gọi là một lệnh trả phí).
+- Ghim phiên bản (revision) của mô hình tạo vector và digest của các image Docker.
+- Từ chối endpoint mô hình không phải https.
+- Giữ tự động escape HTML trong view của hệ thống (view demo phải tự gọi `h(...)`).
 
 Demo bỏ qua: đăng nhập và phân quyền, mở rộng tải, OCR, và nhớ hội thoại.
