@@ -56,9 +56,9 @@ docker compose up -d
 - `docker compose down -v` xóa CHỈ dữ liệu của dự án này: volume cơ sở dữ liệu (`pgdata`, mọi dòng tài liệu đã nạp) và volume cache mô hình (`models`). Mô hình tạo vector được tải lại, khoảng 118 MB. Code không bị xóa.
 - File đã tải lên khi tập thử KHÔNG nằm trong volume mà nằm trong thư mục `data/raw/` trên máy, nên `down -v` không xóa chúng. Vì vậy phải có dòng `rm -f data/raw/chinh-sach-hoan-tien.docx`, và `ls data/raw` phải hiện đúng 3 file: `quy-che-nghi-phep.pdf`, `quy-dinh-lam-viec-tu-xa.docx`, `travel-expense-policy.pdf`. Nếu có file khác (ví dụ file tải lên thử khác), xóa nó đi, vì `scripts/ingest` nạp cả thư mục và sẽ tốn thêm lệnh gọi trả phí.
 - Chạy `scripts/ingest` TRƯỚC `up -d`: lệnh này tự khởi động cơ sở dữ liệu, tải mô hình một lần rồi nạp. Làm ngược lại thì hai container có thể cùng tải mô hình vào một cache.
-- Lần nạp đầu gọi DeepSeek một lần cho mỗi trang (12 trang cho 3 file mẫu); thời gian chạy chưa được đo.
+- Lần nạp đầu gọi DeepSeek một lần cho mỗi trang (12 trang cho 3 file mẫu). Số đo trong một lần chạy thử từ trạng thái trống (`down -v` rồi `scripts/ingest`, laptop Apple Silicon): tổng 83 giây, gồm khởi động cơ sở dữ liệu, tải mô hình (khoảng 118 MB) và nạp 12 trang. Đây là số quan sát được một lần, không phải cam kết.
 - Lần chạy đầu cũng build image (khoảng 1 GB) và tải image Postgres, mất vài phút. Hãy làm trước giờ demo.
-- Kết quả mong đợi của `scripts/ingest`:
+- Kết quả mong đợi của `scripts/ingest` (trước dòng `OK:` có thể có các dòng tiến độ tải mô hình và một dòng `onnxruntime cpuid_info warning`, vô hại):
 
 ```
 OK: quy-che-nghi-phep.pdf, quy-dinh-lam-viec-tu-xa.docx, travel-expense-policy.pdf
@@ -70,7 +70,7 @@ OK: quy-che-nghi-phep.pdf, quy-dinh-lam-viec-tu-xa.docx, travel-expense-policy.p
 Bỏ qua (không đổi): quy-che-nghi-phep.pdf, quy-dinh-lam-viec-tu-xa.docx, travel-expense-policy.pdf
 ```
 
-Sau `up -d`, chờ vài giây cho đến khi `docker compose logs app` hiện dòng `* Listening on http://0.0.0.0:4567` (Puma đang lắng nghe), rồi mới mở http://localhost:4567.
+Sau `up -d`, chờ vài giây (trong lần chạy thử, trang trả lời sau khoảng 3 giây) cho đến khi `docker compose logs app` hiện dòng `* Listening on http://0.0.0.0:4567` (Puma đang lắng nghe), rồi mới mở http://localhost:4567.
 
 Sau buổi demo, dọn file đã tải lên bằng `rm -f data/raw/chinh-sach-hoan-tien.docx` (và `docker compose down -v` nếu muốn xóa cả dữ liệu).
 
@@ -86,11 +86,11 @@ Câu hỏi lấy nguyên văn từ `evaluation/questions.yml`. Trả lời của
 4. Câu hỏi không có đáp án: `Công ty thưởng Tết bao nhiêu tháng lương?`
    Mong đợi: chỉ có dòng `Không tìm thấy thông tin này trong tài liệu.`, không có nguồn.
 5. Tải file lên ngay trên màn hình: mở trang `Tài liệu`, chọn `data/samples/upload-demo/chinh-sach-hoan-tien.docx`, bấm `Tải lên`. Trạng thái đầu có thể là `đang chờ`, rồi `đang xử lý`, rồi `xong`. Trong lúc chờ có thể sang trang Hỏi đáp thử; quay lại trang Tài liệu để thấy `xong`, rồi hỏi: `Hàng về tay được 10 ngày rồi, giờ muốn trả thì được hoàn bao nhiêu phần trăm?`
-   Mong đợi: 70%, nguồn `chinh-sach-hoan-tien.docx`. Trong lúc chờ, trang Hỏi đáp vẫn dùng được. Chờ khoảng 18 giây (số ghi nhận khi thử file mẫu này).
+   Mong đợi: trả lời hoàn 70%, với các nguồn `chinh-sach-hoan-tien.docx · trang 2 (bản PDF)` (trích `Từ 8 đến 15 ngày | hoàn 70%`), `trang 1 (bản PDF)` và `trang 3 (bản PDF)`. Trong lúc chờ, trang Hỏi đáp vẫn dùng được. Trong lần chạy thử, trạng thái hiện `đang xử lý` ngay và `xong` sau 10 đến 17 giây (3 trang, 4 đoạn); đây là số quan sát được trên một lần chạy.
 
 Lưu ý: số trang của nguồn `.docx` là số trang của bản PDF đã chuyển đổi, hiển thị `trang N (bản PDF)`.
 
-Số liệu đã đo (xem `scripts/spikes/RESULTS.md`): truy xuất đúng 10/10 trên bộ câu hỏi mẫu với `Xenova/multilingual-e5-small`; trong lần thử trực tiếp, gateway trả chữ đầu tiên sau 1,53 giây khi tắt chế độ suy nghĩ (6,79 giây khi để bật); từ dòng lệnh, `scripts/ask` hiện chữ đầu tiên sau khoảng 3 giây, tính cả khoảng 2 giây khởi động container; trên web, câu trả lời hiện dần; image `app` khoảng 1 GB (1,04 GB).
+Số liệu đã đo (xem `scripts/spikes/RESULTS.md`): truy xuất đúng 10/10 trên bộ câu hỏi mẫu với `Xenova/multilingual-e5-small` (cũng 10/10 khi chạy `evaluation/check_retrieval` trên dữ liệu vừa nạp từ trạng thái trống); trong lần thử trực tiếp, gateway trả chữ đầu tiên sau 1,53 giây khi tắt chế độ suy nghĩ (6,79 giây khi để bật); từ dòng lệnh, `scripts/ask` hiện chữ đầu tiên sau khoảng 3 giây, tính cả khoảng 2 giây khởi động container; trên web, câu trả lời hiện dần; image `app` khoảng 1 GB (1,04 GB).
 
 ## 4. Bộ câu hỏi chạy tay
 
@@ -150,7 +150,7 @@ docker run --rm -v "$PWD:/app" -w /app app scripts/build_samples   # tạo lại
 
 ## 8. Đưa lõi vào hệ thống thật
 
-Lõi là `src/rag.rb` cùng các thư mục con của `src/` (trừ `src/web/`) và `config/llm.yaml`, `config/retriever.yaml`. Chưa đóng gói thành gem: hãy copy các file này vào dự án Ruby/Rails (`src/rag.rb` tự `require` mọi file trong các thư mục con, trừ `src/web/`). `src/web/`, `scripts/`, `evaluation/` và `config.ru` chỉ là phần demo.
+Lõi là TOÀN BỘ thư mục `src/` trừ `src/web/`: ba file nằm thẳng trong `src/` (`rag.rb`, `text.rb`, `config.rb`) và mọi thư mục con. Chưa đóng gói thành gem: hãy copy phần này vào MỘT thư mục riêng của dự án Ruby/Rails, ví dụ `lib/rag/`, không chứa gì khác, vì `rag.rb` tự `require` mọi file `.rb` dưới thư mục của nó (trừ thư mục con `web/`). Loại thư mục đó khỏi autoloader của hệ thống (với Rails là Zeitwerk: tên file không theo quy ước đặt tên của nó) và nạp bằng đúng một lệnh `require` file `rag.rb`. Hai file cấu hình `llm.yaml` và `retriever.yaml` phải nằm trong thư mục `config/` NGANG HÀNG với thư mục đó, vì `rag.rb` đọc `File.expand_path("../config", __dir__)`: với lõi ở `lib/rag/` thì các file là `lib/config/llm.yaml` và `lib/config/retriever.yaml`. Thiếu file, thiếu khóa hoặc sai kiểu giá trị thì lỗi ngay khi nạp. `src/web/`, `scripts/`, `evaluation/` và `config.ru` chỉ là phần demo.
 
 Hai điểm vào, mỗi điểm nhận ba thành phần truyền từ ngoài:
 
