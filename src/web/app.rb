@@ -208,7 +208,9 @@ class Web < Sinatra::Base
   # Absent -> default tenant; present but unknown/blank/repeated -> 400.
   def ask_tenant
     return Rag::DEFAULT_TENANT unless request.env.key?("HTTP_X_TENANT_ID")
-    tenant_param(request.env["HTTP_X_TENANT_ID"])
+    t = request.env["HTTP_X_TENANT_ID"]
+    halt 400, "Tenant không hợp lệ." unless Rag::TENANTS.include?(t)
+    t
   end
 
   # -> [question, history, document_ids] with history as at most 3 {q:, a:} Symbol-key hashes, or halts 400.

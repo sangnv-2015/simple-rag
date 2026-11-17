@@ -292,7 +292,11 @@ class AskRouteTest < Minitest::Test
   def test_unknown_or_blank_tenant_header_is_400_and_ask_not_called
     ask = FakeAsk.new { raise "must not be called" }
     app = app_with(ask: ask)
-    ["", "NUS", " nus", "zzz"].each { |t| assert_equal 400, post_ask(app, { "q" => "x" }, tenant: t).status, t.inspect }
+    ["", "NUS", " nus", "zzz"].each do |t|
+      res = post_ask(app, { "q" => "x" }, tenant: t)
+      assert_equal 400, res.status, t.inspect
+      assert_equal "Tenant không hợp lệ.", res.body
+    end
     assert_empty ask.calls
   end
 

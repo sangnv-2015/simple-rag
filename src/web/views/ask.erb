@@ -42,7 +42,7 @@
       go = document.getElementById("go"), chat = document.getElementById("chat"),
       newChat = document.getElementById("new-chat"), list = document.getElementById("sidebar-list"),
       tenantSel = document.getElementById("tenant"), scope = document.getElementById("scope"), scopeMsg = document.getElementById("scope-msg");
-  var DEFAULT_TENANT = tenantSel.querySelector("option[selected]").value, TENANT_KEY = "rag.tenant", scopeSeq = 0;
+  var DEFAULT_TENANT = tenantSel.querySelector("option[selected]").value, TENANT_KEY = "rag.tenant", scopeSeq = 0, scopeReady = false;
   var NOT_FOUND = "Không tìm thấy thông tin này trong tài liệu.";
   var ERROR_TEXT = "Không thể trả lời lúc này. Vui lòng thử lại sau.";
   var current = { id: null, turns: [] }, ctrl = null;
@@ -166,9 +166,9 @@
       var a = JSON.parse(localStorage.getItem(KEY));
       if (!Array.isArray(a)) return [];
       return a.filter(function (c) {
-        return c && typeof c === "object" && typeof c.id === "string" && typeof c.title === "string" && Array.isArray(c.turns) &&
+        return c && typeof c === "object" && typeof c.id === "string" && typeof c.title === "string" && (c.tenant == null || typeof c.tenant === "string") && Array.isArray(c.turns) &&
           c.turns.every(function (t) {
-            return t && typeof t === "object" && typeof t.q === "string" && typeof t.found === "boolean" && Array.isArray(t.sources) && (!t.found || typeof t.a === "string");
+            return t && typeof t === "object" && typeof t.q === "string" && typeof t.found === "boolean" && Array.isArray(t.sources) && (t.chunks == null || Array.isArray(t.chunks)) && (!t.found || typeof t.a === "string");
           });
       }).map(function (c) { c.updatedAt = Number(c.updatedAt) || 0; c.tenant = tenantOf(c); return c; }); // a conversation with any bad turn is dropped whole
     } catch (e) { return []; }
@@ -254,6 +254,7 @@
   // Loads the current documents of the selected tenant as checkboxes (all checked); a late response for another tenant is dropped.
   function loadScope() {
     var seq = ++scopeSeq, t = tenant();
+    scopeReady = false;
     scope.textContent = "";
     scopeMsg.hidden = true;
     scope.appendChild(el("p", "meta", "Đang tải danh sách tài liệu…"));
@@ -262,6 +263,7 @@
       .then(function (data) {
         if (seq !== scopeSeq) return;
         scope.textContent = "";
+        scopeReady = true;
         var docs = data.documents || [];
         if (!docs.length) return scope.appendChild(el("p", "meta", "Tenant này chưa có tài liệu nào."));
         docs.forEach(function (d) {
@@ -342,7 +344,7 @@
     ev.preventDefault();
     var q = input.value.trim();
     if (!q || go.disabled) return;
-    if (!checkedIds().length) { scopeMsg.textContent = "Chọn ít nhất một tài liệu."; scopeMsg.hidden = false; return; } // never send [] (= all documents)
+    if (!checkedIds().length) { scopeMsg.textContent = scopeReady ? "Chọn ít nhất một tài liệu." : "Chưa tải được danh sách tài liệu."; scopeMsg.hidden = false; return; } // never send [] (= all documents)
     scopeMsg.hidden = true;
     input.value = "";
     sendQuestion(q);
