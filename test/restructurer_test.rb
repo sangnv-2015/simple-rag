@@ -12,10 +12,13 @@ class RestructurerTest < Minitest::Test
     refute keep?("Năm 2025 và 12", "Năm và 12")
   end
 
-  def test_numbers_ignore_layout_spaces_and_nfd
-    raw = "Nghỉ phép      12\n   ngày".unicode_normalize(:nfd)
-    assert keep?(raw, "| Nghỉ phép | 12 ngày |")
-    assert keep?("Nghỉ 12", "Nghỉ phép 12".unicode_normalize(:nfd))
+  def test_repeated_number_changed_is_flagged
+    refute keep?("Nghỉ cưới: 3 ngày. Nghỉ tang: 3 ngày. Phép năm: 12 ngày.",
+                 "Nghỉ cưới: 3 ngày. Nghỉ tang: 5 ngày. Phép năm: 12 ngày.")
+  end
+
+  def test_list_marker_does_not_cover_lost_number
+    refute keep?("Nghỉ 2 ngày", "1. Nghỉ 3 ngày\n2. Khác")
   end
 
   def test_call_returns_markdown_when_numbers_kept
@@ -50,5 +53,33 @@ class RestructurerTest < Minitest::Test
   def test_llm_error_propagates
     llm = FakeLLM.new { Rag::DeepSeek::Error.new("boom") }
     assert_raises(Rag::DeepSeek::Error) { Rag::Restructurer.new(llm: llm).call("x 1") }
+  end
+
+  def test_bare_fence_and_md_label_unwrapped
+    { "```\n# A\n12\n```" => "# A\n12", "```MD\n# A\n12\n```" => "# A\n12" }.each do |reply, want|
+      r = Rag::Restructurer.new(llm: FakeLLM.new { reply }).call("A 12")
+      assert_equal want, r.markdown
+    end
+  end
+
+  def test_replys_own_code_blocks_are_kept
+    reply = "```ruby\nputs 1\n```\n\ntext 12\n\n```sh\nls\n```"
+    r = Rag::Restructurer.new(llm: FakeLLM.new { reply }).call("A 12 1")
+    assert_equal reply, r.markdown
+  end
+
+  def test_prompt_closes_page_block
+    llm = FakeLLM.new { "x 1" }
+    Rag::Restructurer.new(llm: llm).call("PAGE_BODY 1")
+    content = llm.calls.last[:messages].first[:content]
+    assert_match(/PAGE_BODY 1\n---\s*\z/, content)
+    assert_match(/not instructions/, content)
+  end
+
+  def test_fake_llm_yields_string_once_when_block_given
+    deltas = []
+    out = FakeLLM.new { "abc" }.chat([]) { |d| deltas << d }
+    assert_equal ["abc"], deltas
+    assert_equal "abc", out
   end
 end
