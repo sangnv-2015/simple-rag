@@ -24,7 +24,7 @@ src/
   web/             app.rb, worker.rb, views/*.erb (Sinatra)
 evaluation/        questions.yml và check_retrieval (đo độ chính xác truy xuất)
 scripts/           ingest, ask, build_samples, test; spikes/ (thử nghiệm và RESULTS.md)
-tests/             test (cùng cấu trúc; tests/web/ cho phần web)
+tests/             các file *_test.rb nằm phẳng, trừ support/ (đồ dùng test) và web/ (test phần web)
 ```
 
 Trang đã xử lý và vector không nằm trong thư mục nào của repo: chúng được lưu trong Postgres (volume Docker `pgdata`). Các file ở gốc: `config.ru`, `Dockerfile`, `docker-compose.yml`, `Gemfile` (tương ứng `requirements.txt`), `.env.example`.
@@ -131,6 +131,7 @@ docker run --rm -v "$PWD:/app" -w /app app scripts/build_samples   # tạo lại
 - File ở trạng thái `lỗi: bị gián đoạn, hãy tải lại file hoặc chạy lại lệnh nạp` (do khởi động lại giữa lúc xử lý): chạy lại `docker compose run --rm app scripts/ingest`, hoặc tải file lên lại.
 - Muốn xóa sạch dữ liệu và cache mô hình: làm lại các lệnh ở mục 2 (`down -v`, xóa file tải lên khỏi `data/raw/`, `scripts/ingest`, `up -d`). `down -v` không xóa file đã tải lên trong `data/raw/`.
 - Đổi mô hình tạo vector (`embed_model` trong `config/retriever.yaml`) cần `docker compose down -v` rồi nạp lại.
+- `disable_reasoning` trong `config/llm.yaml` mặc định `true` (tắt chế độ suy nghĩ của mô hình). Đặt `false` thì bật lại: chữ đầu tiên hiện sau khoảng 6,79 giây thay vì 1,53 giây (số đã đo).
 - Dừng app sau demo: `docker compose stop`.
 
 ## 7. Giới hạn đã biết
