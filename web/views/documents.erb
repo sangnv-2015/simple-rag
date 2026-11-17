@@ -1,0 +1,23 @@
+<p><a href="/">Hỏi đáp</a></p>
+<h2>Tài liệu</h2>
+<% if @message %><p class="note" role="alert"><%= h @message %></p><% end %>
+<% if @rows.empty? %>
+<p>Chưa có tài liệu nào.</p>
+<% else %>
+<table>
+  <tr><th>Tên file</th><th>Số trang</th><th>Số đoạn</th><th>Trạng thái</th></tr>
+<% @rows.each do |name, pages, chunks, label| %>
+  <tr>
+    <td><a href="/documents/<%= h ERB::Util.url_encode(name) %>"><%= h name %></a></td>
+    <td><%= h pages %></td>
+    <td><%= h chunks %></td>
+    <td><%= h label %></td>
+  </tr>
+<% end %>
+</table>
+<% end %>
+<form method="post" action="/documents" enctype="multipart/form-data">
+  <label for="file">Chọn file (.pdf hoặc .docx)</label>
+  <input type="file" id="file" name="file" accept=".pdf,.docx" required>
+  <button type="submit">Tải lên</button>
+</form>

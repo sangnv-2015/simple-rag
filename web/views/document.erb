@@ -1,0 +1,18 @@
+<p><a href="/documents">Tài liệu</a> · <a href="/">Hỏi đáp</a></p>
+<h2><%= h @name %></h2>
+<% @pages.each do |pg| %>
+<section class="page<%= " current" if pg.number == @current %>" id="page-<%= h pg.number %>">
+  <h3>Trang <%= h pg.number %></h3>
+<% if !pg.readable %>
+  <p class="flag">Trang không đọc được (không có lớp chữ)</p>
+<% else %>
+<% if pg.fallback %>
+  <p class="flag">Đã dùng chữ gốc vì markdown thiếu số liệu</p>
+<% end %>
+  <div class="cols">
+    <div><h4>Chữ gốc</h4><pre><%= h pg.raw_text %></pre></div>
+    <div><h4>Markdown (DeepSeek dựng lại)</h4><pre><%= h pg.markdown %></pre></div>
+  </div>
+<% end %>
+</section>
+<% end %>

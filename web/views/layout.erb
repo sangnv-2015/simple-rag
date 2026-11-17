@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<% if @refresh %><meta http-equiv="refresh" content="3"><% end %>
 <title>Hỏi đáp tài liệu</title>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 46rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; color: #222; }
+  body { font-family: system-ui, sans-serif; max-width: 70rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; color: #222; }
   nav { display: flex; justify-content: space-between; align-items: baseline; }
   input[type=text] { width: 100%; box-sizing: border-box; padding: .5rem; font-size: 1rem; margin: .25rem 0 .5rem; }
   button { padding: .5rem 1.25rem; font-size: 1rem; }
@@ -14,6 +15,14 @@
   #sources { padding-left: 0; list-style: none; }
   #sources li { margin: .5rem 0; }
   .quote { color: #555; display: block; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { text-align: left; padding: .25rem .5rem; border-bottom: 1px solid #ddd; }
+  .cols { display: flex; flex-wrap: wrap; gap: 1rem; }
+  .cols > div { flex: 1 1 22rem; min-width: 0; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f6f6f6; padding: .5rem; margin: .25rem 0; }
+  .page { margin: 1.5rem 0; padding: .5rem; border: 1px solid #ddd; border-radius: 4px; }
+  .page.current { border: 2px solid #c80; background: #fffaf0; }
+  .flag { background: #fff6dd; padding: .25rem .5rem; border-radius: 4px; }
 </style>
 </head>
 <body>
