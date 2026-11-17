@@ -55,7 +55,7 @@ module Rag
     end
 
     def call(question, history = [], tenant_id: Rag::DEFAULT_TENANT, document_ids: [], source: "cli", &on_delta)
-      return Answer.new("", false, []) if Text.squash(question).empty?
+      return Answer.new("", false, [], nil, []) if Text.squash(question).empty?
       standalone = history.empty? ? question : rewrite(history, question)
       hits = @retriever.call(standalone, tenant_id: tenant_id, document_ids: document_ids)
       answer = if hits.empty? || hits.first.score < @min_score

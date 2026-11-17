@@ -216,7 +216,8 @@ class AskTest < Minitest::Test
   def test_blank_question_calls_nothing
     @llm = FakeLLM.new { "x" }
     a = Rag::Ask.new(llm: @llm, embedder: @embedder, store: @store).call(" \n  ")
-    assert_equal Rag::Answer.new("", false, []), a
+    assert_equal Rag::Answer.new("", false, [], nil, []), a
+    assert_equal [], a.hits
     assert_empty @llm.calls
     assert_empty @embedder.queries
   end

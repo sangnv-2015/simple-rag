@@ -12,5 +12,6 @@ Web.set :ask, sys.ask
 Web.set :store, sys.store
 Web.set :worker, Worker.new { |id, path| sys.ingest.run(id, path) }
 Web.set :ingest, sys.ingest
+Web.set :retriever, sys.retriever
 Web.set :documents_dir, sys.config.documents_dir
 run Web

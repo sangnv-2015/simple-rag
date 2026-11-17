@@ -1,0 +1,316 @@
+openapi: 3.0.3
+info:
+  title: NUSAskify API
+  version: "1.0"
+  description: >
+    Multi-tenant document Q&A. Every operation needs the X-Tenant-Id header
+    (exactly "nus" or "acme"; no default is applied). Errors are {"error": "..."}.
+servers:
+  - url: /
+components:
+  parameters:
+    TenantId:
+      name: X-Tenant-Id
+      in: header
+      required: true
+      schema: { type: string, enum: [nus, acme] }
+      example: nus
+    DocumentId:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+      example: 1
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        field: { type: string }
+        detail: { type: string }
+      example: { error: "X-Tenant-Id header is missing or unknown" }
+    Chunk:
+      type: object
+      required: [chunk_id, document_id, title, version, page, score, content]
+      properties:
+        chunk_id: { type: integer }
+        document_id: { type: integer }
+        title: { type: string }
+        version: { type: integer }
+        page: { type: integer }
+        score: { type: number, description: "1 - cosine distance, 3 decimals" }
+        content: { type: string }
+      example:
+        chunk_id: 12
+        document_id: 3
+        title: Refund policy
+        version: 2
+        page: 4
+        score: 0.812
+        content: "Refunds are paid within 14 days."
+    Citation:
+      type: object
+      properties:
+        n: { type: integer }
+        chunk_id: { type: integer }
+        document_id: { type: integer }
+        title: { type: string }
+        version: { type: integer }
+        page: { type: integer }
+        quote: { type: string, nullable: true }
+    Document:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        version: { type: integer }
+        filename: { type: string }
+        valid_from: { type: string, format: date }
+        valid_to: { type: string, format: date }
+        status: { type: string, enum: [processing, done, expired, error] }
+        error: { type: string, nullable: true }
+        chunk_count: { type: integer }
+      example:
+        id: 3
+        title: Refund policy
+        version: 2
+        filename: refund.pdf
+        valid_from: "2026-01-01"
+        valid_to: "2026-12-31"
+        status: done
+        error: null
+        chunk_count: 8
+  responses:
+    BadRequest:
+      description: Missing or unknown X-Tenant-Id, or an invalid parameter or body.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Document not found in this tenant.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: "document not found" }
+    TooLarge:
+      description: Request body over 64 KB.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: "request body too large" }
+paths:
+  /api/documents:
+    get:
+      summary: List the tenant's documents
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - name: current
+          in: query
+          required: false
+          description: "true keeps only documents that are done and valid today."
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: Documents.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  documents:
+                    type: array
+                    items: { $ref: "#/components/schemas/Document" }
+              example:
+                documents:
+                  - id: 3
+                    title: Refund policy
+                    version: 2
+                    filename: refund.pdf
+                    valid_from: "2026-01-01"
+                    valid_to: "2026-12-31"
+                    status: done
+                    error: null
+                    chunk_count: 8
+        "400": { $ref: "#/components/responses/BadRequest" }
+    post:
+      summary: Upload a document (ingested in the background)
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, title, version, valid_from, valid_to]
+              properties:
+                file: { type: string, format: binary, description: ".pdf or .docx, up to 30 MB" }
+                title: { type: string }
+                version: { type: integer, minimum: 1 }
+                valid_from: { type: string, format: date }
+                valid_to: { type: string, format: date }
+            example:
+              title: Refund policy
+              version: 2
+              valid_from: "2026-01-01"
+              valid_to: "2026-12-31"
+      responses:
+        "202":
+          description: Accepted; poll GET /api/documents for the status.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer }
+                  status: { type: string }
+              example: { id: 3, status: processing }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "422":
+          description: Invalid metadata or a rejected file.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: "invalid metadata", field: version, detail: "Version must be a positive integer." }
+  /api/documents/{id}/chunks:
+    get:
+      summary: List a document's chunks
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/DocumentId"
+      responses:
+        "200":
+          description: Chunks in order.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  chunks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        chunk_index: { type: integer }
+                        page: { type: integer }
+                        text: { type: string }
+              example:
+                chunks:
+                  - { id: 12, chunk_index: 0, page: 4, text: "Refunds are paid within 14 days." }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/documents/{id}:
+    delete:
+      summary: Delete a document and its uploaded file
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/DocumentId"
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer }
+                  deleted: { type: boolean }
+              example: { id: 3, deleted: true }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/search:
+    post:
+      summary: Semantic search over current documents (no LLM, no min_score)
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question: { type: string, maxLength: 2000 }
+                document_ids:
+                  type: array
+                  maxItems: 200
+                  items: { type: integer, minimum: 1 }
+                  description: Empty or absent means all of the tenant's documents.
+                top_k: { type: integer, minimum: 1, maximum: 20 }
+            example: { question: "How long do refunds take?", document_ids: [3], top_k: 5 }
+      responses:
+        "200":
+          description: Best chunks, highest score first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  chunks:
+                    type: array
+                    items: { $ref: "#/components/schemas/Chunk" }
+              example:
+                chunks:
+                  - { chunk_id: 12, document_id: 3, title: Refund policy, version: 2, page: 4, score: 0.812, content: "Refunds are paid within 14 days." }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/ask:
+    post:
+      summary: Ask a question and get a cited answer
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question: { type: string, maxLength: 2000 }
+                document_ids:
+                  type: array
+                  maxItems: 200
+                  items: { type: integer, minimum: 1 }
+            example: { question: "How long do refunds take?", document_ids: [3] }
+      responses:
+        "200":
+          description: >
+            status is answered or not_enough_information (answer is then
+            "Not enough information in the documents." and citations is empty).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [answered, not_enough_information] }
+                  answer: { type: string }
+                  citations:
+                    type: array
+                    items: { $ref: "#/components/schemas/Citation" }
+                  chunks:
+                    type: array
+                    items: { $ref: "#/components/schemas/Chunk" }
+              example:
+                status: answered
+                answer: "Refunds are paid within 14 days [S1]."
+                citations:
+                  - { n: 1, chunk_id: 12, document_id: 3, title: Refund policy, version: 2, page: 4, quote: "paid within 14 days" }
+                chunks:
+                  - { chunk_id: 12, document_id: 3, title: Refund policy, version: 2, page: 4, score: 0.812, content: "Refunds are paid within 14 days." }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "502":
+          description: Upstream model error.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: upstream error }

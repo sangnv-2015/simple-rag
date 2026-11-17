@@ -1,6 +1,7 @@
 require "json"
 require "sinatra/base"
 require_relative "../rag"
+require_relative "api"
 
 class Web < Sinatra::Base
   FRIENDLY_ERROR = "Không thể trả lời lúc này. Vui lòng thử lại sau.".freeze
@@ -37,8 +38,10 @@ class Web < Sinatra::Base
   set :store, nil
   set :worker, nil
   set :ingest, nil
+  set :retriever, nil
   set :documents_dir, nil
   set :max_upload_bytes, Rag::MAX_UPLOAD_BYTES
+  register WebApi
 
   TOO_LARGE = "File quá lớn (tối đa 30 MB).".freeze
   MULTIPART_OVERHEAD = 1024 * 1024
