@@ -33,7 +33,7 @@ CHECKS = {
     a = ask(q["question"], "nus")
     cited = a["citations"].any? { |c| right.any? { |r| r["chunk_id"] == c["chunk_id"] } }
     figure = q["contains"][/\d[\d.,]*/] # the expected figure, e.g. "5" from "tối đa 5 ngày"
-    has_figure = a["answer"].to_s.include?(figure)
+    has_figure = !figure.nil? && a["answer"].to_s.match?(/(?<!\d)#{Regexp.escape(figure)}(?!\d)/)
     [!right.empty? && a["status"] == "answered" && cited && has_figure, "right chunk in top 6: #{!right.empty?}, status=#{a["status"]}, cites it: #{cited}, answer has #{figure}: #{has_figure}"]
   },
   "TC2" => lambda {

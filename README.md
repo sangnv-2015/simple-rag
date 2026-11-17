@@ -4,7 +4,7 @@ Nạp file PDF và Word (.docx) kèm metadata (tenant, tiêu đề, phiên bản
 
 Trang hỏi đáp là khung chat; mỗi tenant có danh sách tài liệu riêng, chọn tài liệu bằng checkbox, và bảng `Đoạn tìm được` cho thấy từng đoạn với điểm tương đồng. Các cuộc trò chuyện được lưu trên trình duyệt (localStorage, tối đa 50 cuộc, tách theo tenant).
 
-Quyền riêng tư: nội dung tài liệu được gửi tới endpoint DeepSeek khi nạp và khi trả lời; câu hỏi và lịch sử hội thoại gửi kèm cũng được gửi tới đó. Mô hình tạo vector chạy cục bộ. Web chỉ mở trên `localhost`.
+Quyền riêng tư: nội dung tài liệu được gửi tới endpoint DeepSeek khi nạp và khi trả lời; câu hỏi và lịch sử hội thoại gửi kèm cũng được gửi tới đó. Mỗi câu hỏi và câu trả lời cũng được ghi vào bảng `query_logs` trong cơ sở dữ liệu cục bộ. Mô hình tạo vector chạy cục bộ. Web chỉ mở trên `localhost`.
 
 ## Báo cáo
 
@@ -158,13 +158,13 @@ docker compose up -d
 - `ls data/raw` hiện 5 file mẫu: `acme-quy-dinh-lam-viec-tu-xa.docx`, `quy-che-nghi-phep-v1.pdf`, `quy-che-nghi-phep.pdf`, `quy-dinh-lam-viec-tu-xa.docx`, `travel-expense-policy.pdf`, cộng thêm file lạ nếu có. Metadata của file mẫu nằm trong `data/samples/manifest.yml`. File không có trong manifest được `scripts/ingest` báo là `Bỏ qua (thiếu metadata)` và không tốn lệnh gọi trả phí. `scripts/ingest` không quét `data/raw/uploads/`: file tải lên qua web hoặc API chỉ được nạp qua đường tải lên.
 - Chạy `scripts/ingest` TRƯỚC `up -d`: lệnh này tự khởi động cơ sở dữ liệu, tải mô hình một lần rồi nạp. Làm ngược lại thì hai container có thể cùng tải mô hình vào một cache.
 - Lần nạp đầu gọi DeepSeek một lần cho mỗi trang (4 trang mỗi file mẫu, 20 trang cho 5 file). Lần chạy đầu cũng build image và tải image Postgres, mất vài phút: hãy làm trước giờ demo.
-- Kết quả của `scripts/ingest` từ trạng thái trống (trước dòng `OK:` có thể có dòng tiến độ tải mô hình và một dòng `onnxruntime cpuid_info warning`, vô hại). Hai file lạ dưới đây là hai PDF của người dùng nằm sẵn trong `data/raw/` của máy này:
+- Kết quả của `scripts/ingest` từ trạng thái trống trên bản clone sạch (trước dòng `OK:` có thể có dòng tiến độ tải mô hình và một dòng `onnxruntime cpuid_info warning`, vô hại):
 
 ```
 OK: acme-quy-dinh-lam-viec-tu-xa.docx, quy-che-nghi-phep-v1.pdf, quy-che-nghi-phep.pdf, quy-dinh-lam-viec-tu-xa.docx, travel-expense-policy.pdf
-Bỏ qua (thiếu metadata): 30398ddc-7412-45a9-8711-963c0d5140a7_Enhancement_-_Rule_Templates.pdf, NUS_Chuong_Trinh_Du_Lich_Vung_Tau_2026_2N1D.pdf
 ```
 
+- File nào nằm trong `data/raw/` mà không có metadata trong manifest sẽ hiện thành `Bỏ qua (thiếu metadata): <tên file>` và không được nạp.
 - Chạy lại thì các file không đổi được bỏ qua và không tốn lệnh gọi trả phí (`Bỏ qua (không đổi): ...`).
 - Sau khi nạp, `quy-che-nghi-phep-v1.pdf` (phiên bản 1, hiệu lực 2024-2025) có trạng thái `expired`, còn `quy-che-nghi-phep.pdf` (phiên bản 2) là `done`; `acme-quy-dinh-lam-viec-tu-xa.docx` thuộc tenant `acme`.
 
@@ -174,7 +174,7 @@ Sau phần demo tải lên, xóa tài liệu đó trên trang `Tài liệu` (nú
 
 ## 3. Kịch bản demo
 
-Mọi câu bên dưới đã được hỏi lại trên dữ liệu vừa nạp (chia đoạn semantic) qua `/api/ask`. Lời mô hình có thể khác chữ, nhưng ý và nguồn phải như dưới đây.
+Các câu bên dưới đã được hỏi lại trên dữ liệu vừa nạp (chia đoạn semantic) qua `/api/ask`, gồm cả câu `acme` ở bước 4 (trả "tối đa 4 ngày", tài liệu của `acme`); riêng bước 3 (xem trang) và việc tải lên bằng form web chưa chạy tay trong lần viết báo cáo này (tải lên được thử qua API). Lời mô hình có thể khác chữ, nhưng ý và nguồn phải như dưới đây.
 
 1. Hỏi khác chữ với tài liệu (tenant `nus`, chọn tất cả tài liệu): `Ngày phép năm ngoái dùng không hết thì được giữ lại sang năm nay mấy ngày?`
    Đã quan sát: "chuyển tối đa 5 ngày sang năm kế tiếp", dùng trước 31/03; nguồn `Quy chế nghỉ phép v2 · trang 2`. Tài liệu viết "chưa dùng hết ... chuyển sang năm kế tiếp", câu hỏi viết khác, vẫn tìm ra (đoạn đúng xếp hạng 1, điểm 0,891): đó là tìm theo nghĩa.
@@ -199,7 +199,7 @@ Mọi số trong mục này lấy từ lệnh chạy trên dữ liệu vừa n�
 docker compose run --rm app evaluation/check_retrieval
 ```
 
-Kết quả: `answerable top-1 min=0.851 | unanswerable top-1 max=0.832 | in top 6: 12/12`. Hạng của đoạn đúng là 1 cho mọi câu, trừ câu "Tôi sắp lấy vợ ..." (hạng 2, điểm 0,897). Điểm hạng 1 cao nhất của câu không có đáp án là 0,832 (cả hai câu); thấp nhất của câu có đáp án là 0,851 (câu "Sáng nay tôi bị sốt, phải báo sếp chậm nhất mấy giờ?").
+Kết quả: `answerable top-1 min=0.851 | unanswerable top-1 max=0.832 | in top 6: 12/12`. Hạng của đoạn đúng là 1 cho mọi câu, trừ câu "Tôi sắp lấy vợ ..." (đoạn đúng xếp hạng 2; điểm 0,897 là điểm của hạng 1). Điểm hạng 1 cao nhất của câu không có đáp án là 0,832 (cả hai câu); thấp nhất của câu có đáp án là 0,851 (câu "Sáng nay tôi bị sốt, phải báo sếp chậm nhất mấy giờ?").
 
 `min_score = 0.84` trong `config/retriever.yaml` là trung điểm của 0,832 và 0,851 (0,8415). Hai khoảng không chồng nhau, nhưng biên mỏng (0,008 phía dưới, 0,011 phía trên): với câu hỏi mới, ngưỡng này có thể chặn nhầm câu có đáp án hoặc để lọt câu không có đáp án. Câu bị chặn không gọi mô hình. Câu tải lên (0,880) vẫn qua ngưỡng; câu có đáp án thấp thứ hai, "Do I need a receipt for a USD 40 taxi ride?", được 0,856. `/api/search` không áp ngưỡng, nên số trên không đổi khi chỉnh ngưỡng.
 
@@ -364,7 +364,7 @@ docker run --rm -v "$PWD:/app" -w /app app scripts/build_samples   # tạo lại
 - Cổng `min_score` hiệu chỉnh trên 12 câu và có biên mỏng (xem 4.1); câu hỏi khác ngôn ngữ với tài liệu có thể bị chặn nhầm (xem TC8 ở 4.4).
 - Ngày hiệu lực được đánh giá theo ngày của server khi hỏi, không có múi giờ riêng cho từng tenant.
 - Không OCR: trang scan được báo là không đọc được.
-- Hội thoại chỉ nằm trên trình duyệt; server không nhớ gì giữa các lần gọi. Server chỉ dùng 3 lượt gần nhất của hội thoại gửi kèm, mỗi câu hỏi cắt còn 1 000 ký tự và mỗi câu trả lời còn 2 000 ký tự.
+- Ngữ cảnh hội thoại nằm trên trình duyệt: server không dùng lại gì giữa các lần gọi ngoài lịch sử mà trình duyệt gửi kèm. Tuy nhiên mỗi câu hỏi và câu trả lời (kể cả của `/api/ask` và `scripts/ask`) được ghi vào bảng `query_logs` trong cơ sở dữ liệu, kèm tenant, điểm và đoạn tìm được; không có cơ chế tự xóa. Server chỉ dùng 3 lượt gần nhất của hội thoại gửi kèm, mỗi câu hỏi cắt còn 1 000 ký tự và mỗi câu trả lời còn 2 000 ký tự.
 - Câu hỏi nối tiếp được viết lại thành câu độc lập bằng mô hình; nếu viết lại sai thì câu trả lời sai theo. Câu viết lại được hiện dưới dòng "Hiểu là:" để người dùng kiểm tra.
 - Nội dung tài liệu được gửi tới endpoint mô hình khi nạp và khi trả lời.
 - Kiểm tra số sau khi dựng lại bắt được số bị đổi hoặc bị mất, nhưng không bắt được hai số bị hoán đổi cho nhau, và không kiểm tra được trang không có số. Cách kiểm tra là xem trang hai cột.
@@ -377,7 +377,7 @@ docker run --rm -v "$PWD:/app" -w /app app scripts/build_samples   # tạo lại
 
 ## 8. Đưa lõi vào hệ thống thật
 
-Lõi là TOÀN BỘ thư mục `src/` trừ `src/web/`: ba file nằm thẳng trong `src/` (`rag.rb`, `text.rb`, `config.rb`) và mọi thư mục con. Chưa đóng gói thành gem: hãy copy phần này vào MỘT thư mục riêng của dự án Ruby/Rails, ví dụ `lib/rag/`, không chứa gì khác, vì `rag.rb` tự `require` mọi file `.rb` dưới thư mục của nó (trừ thư mục con `web/`). Loại thư mục đó khỏi autoloader của hệ thống (với Rails là Zeitwerk: tên file không theo quy ước đặt tên của nó) và nạp bằng đúng một lệnh `require` file `rag.rb`. Hai file cấu hình `llm.yaml` và `retriever.yaml` phải nằm trong thư mục `config/` NGANG HÀNG với thư mục đó, vì `rag.rb` đọc `File.expand_path("../config", __dir__)`: với lõi ở `lib/rag/` thì các file là `lib/config/llm.yaml` và `lib/config/retriever.yaml`. Thiếu file, thiếu khóa hoặc sai kiểu giá trị thì lỗi ngay khi nạp. `src/web/`, `scripts/`, `evaluation/` và `config.ru` chỉ là phần demo.
+Lõi là TOÀN BỘ thư mục `src/` trừ `src/web/`: ba file nằm thẳng trong `src/` (`rag.rb`, `text.rb`, `config.rb`) và mọi thư mục con. Chưa đóng gói thành gem: hãy copy phần này vào MỘT thư mục riêng của dự án Ruby/Rails, ví dụ `lib/rag/`, không chứa gì khác, vì `rag.rb` tự `require` mọi file `.rb` dưới thư mục của nó (trừ thư mục con `web/`). Loại thư mục đó khỏi autoloader của hệ thống (với Rails là Zeitwerk: tên file không theo quy ước đặt tên của nó) và nạp bằng đúng một lệnh `require` file `rag.rb`. Ba file cấu hình `llm.yaml`, `retriever.yaml` và `tenants.yaml` phải nằm trong thư mục `config/` NGANG HÀNG với thư mục đó, vì `rag.rb` đọc `File.expand_path("../config", __dir__)`: với lõi ở `lib/rag/` thì các file là `lib/config/llm.yaml`, `lib/config/retriever.yaml` và `lib/config/tenants.yaml`. Thiếu file, thiếu khóa hoặc sai kiểu giá trị thì lỗi ngay khi nạp. `src/web/`, `scripts/`, `evaluation/` và `config.ru` chỉ là phần demo.
 
 Hai điểm vào, mỗi điểm nhận ba thành phần truyền từ ngoài:
 
@@ -387,7 +387,7 @@ answer = Rag::Ask.new(llm:, embedder:, store:).call(question, history, tenant_id
 ```
 
 - `Rag::Report` có bốn thành phần: `ok`, `skipped`, `failed` (mảng `[tên file, thông báo]`), `empty_dir`; cùng `failed?` và `summary`. `Ingest` không báo lỗi bằng exception theo từng file mà ghi vào `failed`.
-- `Rag::Answer` có `text`, `found`, `sources`, `standalone` (câu hỏi đã dùng để truy xuất: câu đã viết lại, hoặc chính câu hỏi ở lượt đầu); mỗi `Rag::Source` có `n`, `filename`, `page`, `quote` (`nil` nếu không xác minh được). Khi `found` là false thì không có nguồn.
+- `Rag::Answer` có `text`, `found`, `sources`, `standalone` (câu hỏi đã dùng để truy xuất: câu đã viết lại, hoặc chính câu hỏi ở lượt đầu), `hits` (các đoạn đã tìm được, kèm điểm) và `status` (`answered` hoặc `not_enough_information`); mỗi `Rag::Source` có `n`, `filename`, `page`, `quote` (`nil` nếu không xác minh được), `chunk_id`, `document_id`, `title`, `version`. Khi `found` là false thì không có nguồn.
 - Từ lượt thứ hai có `history`, `Ask` gọi LLM thêm một lần (không stream) để viết lại câu hỏi nối tiếp thành câu độc lập, rồi truy xuất bằng câu đó. Mỗi câu hỏi nối tiếp vì vậy tốn hai lệnh gọi trả phí. Prompt trả lời không nhận lịch sử, nên câu hỏi về chính câu trả lời trước ("tóm tắt lại", "giải thích ý thứ 2") sẽ ra `Không tìm thấy thông tin này trong tài liệu.`, đúng theo thiết kế.
 - Phần trả lời được stream qua block; phần trích dẫn do mô hình in sau dấu `Rag::Ask::TOKEN` (`<<QUOTES>>`) bị lọc ra khỏi stream và được kiểm tra bằng code.
 
