@@ -5,7 +5,7 @@ require "rag"
 $stdout.sync = true
 question = ARGV.join(" ")
 if question.strip.empty?
-  warn 'Cách dùng: bin/ask "câu hỏi"'
+  warn 'Cách dùng: scripts/ask "câu hỏi"'
   exit 2
 end
 begin

@@ -50,7 +50,7 @@ class AskRouteTest < Minitest::Test
     assert_equal 200, res.status
     assert_includes res.body, "Hỏi đáp tài liệu"
     assert_includes res.body, 'href="/documents"'
-    assert_includes res.body, "Chưa có tài liệu nào. Chạy lệnh nạp (docker compose run --rm app bin/ingest) hoặc tải file lên ở trang Tài liệu."
+    assert_includes res.body, "Chưa có tài liệu nào. Chạy lệnh nạp (docker compose run --rm app scripts/ingest) hoặc tải file lên ở trang Tài liệu."
     assert_includes res.body, ">Tài liệu</a>"
     assert_match(%r{<button[^>]*>Hỏi</button>}, res.body)
   end
