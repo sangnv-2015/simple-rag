@@ -3,7 +3,7 @@ require "json"
 require "puma"
 require "puma/client"
 require "rack/mock"
-require_relative "../../web/app"
+require_relative "../../src/web/app"
 
 class FakeAsk
   attr_reader :calls

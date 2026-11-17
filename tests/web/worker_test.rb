@@ -1,6 +1,6 @@
 require "test_helper"
 require "timeout"
-require_relative "../../web/worker"
+require_relative "../../src/web/worker"
 
 class WorkerTest < Minitest::Test
   def wait_until

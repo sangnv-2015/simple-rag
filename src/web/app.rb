@@ -1,6 +1,6 @@
 require "json"
 require "sinatra/base"
-require_relative "../src/rag"
+require_relative "../rag"
 
 class Web < Sinatra::Base
   FRIENDLY_ERROR = "Không thể trả lời lúc này. Vui lòng thử lại sau.".freeze

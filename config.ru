@@ -1,6 +1,6 @@
 require_relative "src/rag"
-require_relative "web/app"
-require_relative "web/worker"
+require_relative "src/web/app"
+require_relative "src/web/worker"
 
 begin
   sys = Rag.build

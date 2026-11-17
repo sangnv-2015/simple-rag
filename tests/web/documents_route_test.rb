@@ -2,7 +2,7 @@ require "test_helper"
 require "tmpdir"
 require "stringio"
 require "rack/mock"
-require_relative "../../web/app"
+require_relative "../../src/web/app"
 
 class FakeWorker
   attr_reader :enqueued

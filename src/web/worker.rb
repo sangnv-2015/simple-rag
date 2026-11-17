@@ -1,4 +1,4 @@
-require_relative "../src/rag"
+require_relative "../rag"
 
 # One thread, one queue: jobs run strictly one at a time (LibreOffice shares one profile dir).
 class Worker
