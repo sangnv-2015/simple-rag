@@ -20,14 +20,14 @@ class FakeStore
 
   def finish_document(id, pages:, chunks:)
     e = @docs.fetch(id)
-    e[:pages] = pages.dup
-    e[:chunks] = chunks.dup
+    e[:pages] = pages.map { |p| p.dup.tap { |q| q.raw_text = nul(q.raw_text); q.markdown = nul(q.markdown) } }
+    e[:chunks] = chunks.map { |c| c.dup.tap { |d| d.text = nul(d.text) } }
     e[:doc].status = "done"
     nil
   end
 
   def fail_document(id, message)
-    e = @docs.fetch(id)
+    e = @docs[id] or return
     e[:doc].status = "error"
     e[:doc].error = message
     nil
@@ -42,14 +42,16 @@ class FakeStore
 
   def search(embedding, k)
     hits = @docs.values.flat_map do |e|
-      e[:chunks].map do |c|
+      e[:doc].status == "done" ? e[:chunks].map do |c|
         Rag::Hit.new(filename: e[:doc].filename, page: c.page, text: c.text, distance: cosine_distance(embedding, c.embedding))
-      end
+      end : []
     end
     hits.sort_by(&:distance).first(k)
   end
 
   private
+
+  def nul(s) = s&.delete("\u0000")
 
   def summary(e)
     e[:doc].dup.tap { |d| d.page_count = e[:pages].size; d.chunk_count = e[:chunks].size }

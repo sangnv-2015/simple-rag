@@ -94,4 +94,32 @@ module StoreContract
     %w[b.pdf a.pdf c.pdf].each { |f| store.start_document(filename: f, sha256: "h") }
     assert_equal %w[a.pdf b.pdf c.pdf], store.documents.map(&:filename)
   end
+
+  def test_search_honours_k
+    store = make_store
+    id = store.start_document(filename: "a.pdf", sha256: "h")
+    store.finish_document(id, pages: [page(1)], chunks: [chunk(1, 0, "x", v(0)), chunk(1, 1, "y", v(1))])
+    assert_equal 1, store.search(v(1), 1).size
+  end
+
+  def test_search_ignores_unfinished_documents
+    store = make_store
+    store.finish_document(store.start_document(filename: "ok.pdf", sha256: "h"),
+      pages: [page(1)], chunks: [chunk(1, 0, "ok", v(0))])
+    store.start_document(filename: "busy.pdf", sha256: "h")
+    bad = store.start_document(filename: "bad.pdf", sha256: "h")
+    store.fail_document(bad, "boom")
+    assert_equal ["ok.pdf"], store.search(v(0), 10).map(&:filename)
+  end
+
+  def test_nul_bytes_are_stripped
+    store = make_store
+    id = store.start_document(filename: "a.pdf", sha256: "h")
+    store.finish_document(id, pages: [Rag::Page.new(number: 1, raw_text: "a\u0000b", markdown: nil, readable: true, fallback: false)], chunks: [])
+    assert_equal "ab", store.pages("a.pdf").first.raw_text
+  end
+
+  def test_fail_on_missing_id_is_a_noop
+    assert_nil make_store.fail_document(999, "x")
+  end
 end

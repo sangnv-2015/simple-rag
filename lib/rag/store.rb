@@ -5,12 +5,13 @@ module Rag
   class Store
     def initialize(url)
       @conn = PG.connect(url)
-      @conn.exec("SET client_min_messages = warning") # quiet idempotent-DDL notices
+      setup_connection
+      @conn.type_map_for_results = ::PG::BasicTypeMapForResults.new(@conn)
       @lock = Mutex.new
     end
 
     def migrate!
-      @lock.synchronize do
+      with_conn do
         @conn.exec("CREATE EXTENSION IF NOT EXISTS vector")
         registry = ::PG::BasicTypeRegistry.new.register_default_types
         Pgvector::PG.register_vector(registry)
@@ -34,19 +35,19 @@ module Rag
     end
 
     def start_document(filename:, sha256:)
-      @lock.synchronize do
+      with_conn do
         @conn.transaction do
           @conn.exec_params("DELETE FROM documents WHERE filename = $1", [filename])
           @conn.exec_params(
             "INSERT INTO documents(filename, sha256, status) VALUES ($1, $2, 'processing') RETURNING id",
-            [clean(filename), sha256]
+            [filename, sha256]
           ).first["id"].to_i
         end
       end
     end
 
     def finish_document(id, pages:, chunks:)
-      @lock.synchronize do
+      with_conn do
         @conn.transaction do
           pages.each do |p|
             @conn.exec_params(
@@ -88,6 +89,7 @@ module Rag
       exec(<<~SQL, [Pgvector::Vector.new(embedding).to_s, k]).map do |r|
         SELECT d.filename, c.page_number, c.text, c.embedding <=> $1 AS distance
         FROM chunks c JOIN documents d ON d.id = c.document_id
+        WHERE d.status = 'done'
         ORDER BY distance LIMIT $2
       SQL
         Hit.new(filename: r["filename"], page: r["page_number"].to_i, text: r["text"], distance: r["distance"].to_f)
@@ -96,8 +98,29 @@ module Rag
 
     private
 
+    def setup_connection
+      @conn.exec("SET client_min_messages = warning") # quiet idempotent-DDL notices
+    end
+
+    # One connection, one mutex. On a dropped connection reset and retry the whole block once
+    # (transactions are fully contained in the block, so the retry starts clean).
+    def with_conn
+      @lock.synchronize do
+        retried = false
+        begin
+          yield
+        rescue PG::ConnectionBad, PG::UnableToSend
+          raise if retried
+          retried = true
+          @conn.reset
+          setup_connection
+          retry
+        end
+      end
+    end
+
     def exec(sql, params = [])
-      @lock.synchronize { @conn.exec_params(sql, params).to_a }
+      with_conn { @conn.exec_params(sql, params).to_a }
     end
 
     # Postgres rejects NUL in text; bad extraction can produce it.
