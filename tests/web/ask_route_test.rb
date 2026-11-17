@@ -179,19 +179,23 @@ class AskRouteTest < Minitest::Test
     assert_equal 200, post_ask(app, { "q" => "x" }, host: "tunnel.example", origin: "http://tunnel.example").status
     assert_equal 403, get(app, "/", host: "evil.example").status
     assert_equal 403, get(app, "/", host: "tunnel.example", origin: "https://evil.example").status
+    ngrok = { "HTTP_HOST" => "tunnel.example", "HTTP_ORIGIN" => "https://tunnel.example", "HTTP_X_FORWARDED_PROTO" => "https",
+              input: JSON.generate("q" => "x"), "CONTENT_TYPE" => "application/json" }
+    assert_equal 200, Rack::MockRequest.new(app).post("/ask", ngrok).status
   end
 
   def test_public_host_is_read_and_chat_only
     ask = FakeAsk.new { Rag::Answer.new("", false, []) }
     app = app_with(ask: ask)
     app.set :host_authorization, permitted_hosts: ["localhost", "tunnel.example"]
-    app.set :public_host_list, ["tunnel.example"]
+    app.set :public_host_list, Web.public_hosts("Tunnel.Example")
     mock = Rack::MockRequest.new(app)
     h = { "HTTP_HOST" => "tunnel.example" }
     [["POST", "/api/documents"], ["DELETE", "/api/documents/1"], ["POST", "/api/ask"], ["POST", "/api/search"],
      ["POST", "/documents"], ["POST", "/documents/1/delete"], ["POST", "/%64ocuments/1/delete"]].each do |m, path|
       assert_equal 403, mock.request(m, path, h).status, "#{m} #{path}"
     end
+    assert_equal 403, mock.request("POST", "/api/documents", "HTTP_HOST" => "TUNNEL.EXAMPLE").status
     api = mock.post("/api/ask", h)
     assert_equal({ "error" => "write access is not available on the public host" }, JSON.parse(api.body))
     assert_equal 200, get(app, "/", host: "tunnel.example").status

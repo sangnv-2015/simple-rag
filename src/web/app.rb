@@ -29,7 +29,7 @@ class Web < Sinatra::Base
   set :views, File.expand_path("views", __dir__)
   # PUBLIC_HOST (comma-separated, e.g. an ngrok domain) is let in on top of localhost; unset = local only.
   # Tolerates a pasted URL ("https://x.ngrok-free.app/"): Host headers carry the bare name only.
-  def self.public_hosts(raw) = raw.to_s.split(",").map { |h| h.strip.sub(%r{\A\w+://}, "").chomp("/") }.reject(&:empty?)
+  def self.public_hosts(raw) = raw.to_s.split(",").map { |h| h.strip.sub(%r{\A\w+://}, "").chomp("/").downcase }.reject(&:empty?)
   PUBLIC_HOSTS = public_hosts(ENV["PUBLIC_HOST"]).freeze
   set :public_host_list, PUBLIC_HOSTS
   set :host_authorization, permitted_hosts: ["localhost", "127.0.0.1", "[::1]", *PUBLIC_HOSTS]
@@ -86,7 +86,7 @@ class Web < Sinatra::Base
   end
 
   def public_request?(env)
-    host = env["HTTP_HOST"].to_s.sub(/:\d+\z/, "")
+    host = env["HTTP_HOST"].to_s.sub(/:\d+\z/, "").downcase
     settings.public_host_list.include?(host)
   end
 

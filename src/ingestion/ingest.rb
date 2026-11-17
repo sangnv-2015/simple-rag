@@ -42,8 +42,8 @@ module Rag
       sha = Digest::SHA256.file(path).hexdigest
       existing = @store.find_document(tenant_id: meta.tenant_id, title: meta.title, version: meta.version)
       if existing && existing.sha256 == sha && %w[done expired].include?(existing.status)
-        # Same file, maybe new dates: keep the data, store the dates the caller gave.
-        @store.update_validity(existing.id, valid_from: meta.valid_from, valid_to: meta.valid_to) unless [existing.valid_from, existing.valid_to] == [meta.valid_from, meta.valid_to]
+        # Same file, maybe new dates: keep the data, store the dates the caller gave (not on expired: its valid_to was trimmed by the newer version).
+        @store.update_validity(existing.id, valid_from: meta.valid_from, valid_to: meta.valid_to) unless existing.status == "expired" || [existing.valid_from, existing.valid_to] == [meta.valid_from, meta.valid_to]
         return Prepared.new(existing.id, true, name)
       end
       id = @store.start_document(**meta.to_h, filename: name, path: path, sha256: sha)

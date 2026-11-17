@@ -252,6 +252,16 @@ class IngestTest < Minitest::Test
     assert_equal ["done", Date.new(2026, 3, 1), Date.new(2027, 3, 1)], [d.status, d.valid_from, d.valid_to]
   end
 
+  def test_prepare_same_sha_new_dates_on_expired_version_keeps_trimmed_dates
+    p1 = write("v1.pdf")
+    ing = ingest("v1.pdf" => [page(1)], "v2.pdf" => [page(1)])
+    ing.call(p1, meta(version: 1))
+    ing.call(write("v2.pdf", "other"), meta(version: 2, valid_from: Date.new(2026, 6, 1)))
+    trimmed = by_name(@store, "v1.pdf").valid_to
+    assert ing.prepare(p1, meta(version: 1, valid_to: Date.new(2030, 1, 1))).skipped
+    assert_equal ["expired", trimmed], by_name(@store, "v1.pdf").then { |d| [d.status, d.valid_to] }
+  end
+
   def test_prepare_same_triple_new_sha_replaces
     path = write("a.pdf", "v1")
     ing = ingest("a.pdf" => [page(1)])
