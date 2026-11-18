@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">Đường đi của một câu hỏi</title>
+  <desc id="desc">Truy xuất có lọc SQL theo tenant và hiệu lực, cổng min_score, DeepSeek trả lời chỉ từ đoạn tìm được, rồi code kiểm tra trích dẫn khớp từng chữ. Điểm thấp hoặc mô hình trả NOT_FOUND thì trả not_enough_information.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#5b6475"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="360" rx="24" fill="#f7f8fa"/>
+
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+    <text x="64" y="64" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#5b6475" letter-spacing="1">CÂU HỎI → CÂU TRẢ LỜI CÓ NGUỒN</text>
+
+    <g transform="translate(64 96)">
+      <rect width="230" height="116" rx="14" fill="#fff" stroke="#e3e6eb" stroke-width="2"/>
+      <text x="20" y="40" font-size="22" font-weight="700" fill="#1a1f2b">1 · Truy xuất</text>
+      <text x="20" y="72" font-size="18" fill="#5b6475">lọc SQL: tenant,</text>
+      <text x="20" y="96" font-size="18" fill="#5b6475">hiệu lực, tài liệu</text>
+    </g>
+    <g transform="translate(334 96)">
+      <rect width="230" height="116" rx="14" fill="#fff7e0" stroke="#f3d98b" stroke-width="2"/>
+      <text x="20" y="40" font-size="22" font-weight="700" fill="#1a1f2b">2 · Cổng điểm</text>
+      <text x="20" y="72" font-size="18" fill="#5b6475">hạng 1 ≥ min_score</text>
+      <text x="20" y="96" font-size="18" fill="#5b6475">(0,84, cosine)</text>
+    </g>
+    <g transform="translate(604 96)">
+      <rect width="230" height="116" rx="14" fill="#fff" stroke="#e3e6eb" stroke-width="2"/>
+      <text x="20" y="40" font-size="22" font-weight="700" fill="#1a1f2b">3 · DeepSeek</text>
+      <text x="20" y="72" font-size="18" fill="#5b6475">trả lời chỉ từ</text>
+      <text x="20" y="96" font-size="18" fill="#5b6475">đoạn tìm được</text>
+    </g>
+    <g transform="translate(874 96)">
+      <rect width="262" height="116" rx="14" fill="#fff" stroke="#2453c7" stroke-width="2"/>
+      <text x="20" y="40" font-size="22" font-weight="700" fill="#1a1f2b">4 · Kiểm trích dẫn</text>
+      <rect x="18" y="55" width="132" height="24" rx="3" fill="#fde68a"/>
+      <text x="22" y="72" font-size="18" fill="#1a1f2b">khớp từng chữ</text>
+      <text x="20" y="100" font-size="18" fill="#5b6475">sai thì quote = null</text>
+    </g>
+
+    <line x1="296" y1="154" x2="330" y2="154" stroke="#5b6475" stroke-width="2" marker-end="url(#arrow)"/>
+    <line x1="566" y1="154" x2="600" y2="154" stroke="#5b6475" stroke-width="2" marker-end="url(#arrow)"/>
+    <line x1="836" y1="154" x2="870" y2="154" stroke="#5b6475" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <path d="M449 214 V262" stroke="#b7791f" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+    <path d="M719 214 V262" stroke="#b7791f" stroke-width="2" stroke-dasharray="6 6" fill="none" marker-end="url(#arrow)"/>
+    <g transform="translate(334 266)">
+      <rect width="500" height="58" rx="12" fill="#fff" stroke="#f3d98b" stroke-width="2"/>
+      <text x="20" y="36" font-size="20" fill="#1a1f2b"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, monospace" fill="#b7791f">not_enough_information</tspan>  · không bịa</text>
+    </g>
+    <text x="461" y="244" font-size="18" fill="#5b6475">điểm thấp · không gọi LLM</text>
+    <text x="731" y="244" font-size="18" fill="#5b6475">NOT_FOUND · không nguồn</text>
+  </g>
+</svg>

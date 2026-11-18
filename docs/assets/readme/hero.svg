@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">NUSAskify</title>
+  <desc id="desc">Hỏi đáp tài liệu PDF và DOCX theo từng tenant. Bên phải: một câu trả lời kèm nguồn có đoạn trích được tô vàng và xác minh khớp từng chữ, và một câu hỏi không có đáp án bị chặn trước khi gọi LLM.</desc>
+
+  <rect width="1200" height="420" rx="24" fill="#f7f8fa"/>
+
+  <g id="title-block" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+    <text x="64" y="92" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#5b6475" letter-spacing="1">RAG · RUBY · PGVECTOR · ĐA TENANT</text>
+    <rect x="64" y="122" width="56" height="56" rx="14" fill="#2453c7"/>
+    <text x="92" y="161" font-size="30" font-weight="700" fill="#fff" text-anchor="middle">?</text>
+    <text x="136" y="168" font-size="64" font-weight="800" fill="#1a1f2b" letter-spacing="-1.5">NUSAskify</text>
+    <text x="64" y="232" font-size="26" fill="#1a1f2b">Hỏi đáp tài liệu PDF, DOCX theo từng tenant.</text>
+    <text x="64" y="270" font-size="26" fill="#1a1f2b">Mỗi câu trả lời kèm <tspan font-weight="700">trích dẫn</tspan></text>
+    <rect x="64" y="284" width="182" height="36" rx="4" fill="#fde68a"/>
+    <text x="70" y="310" font-size="26" font-weight="700" fill="#1a1f2b">khớp từng chữ</text>
+    <text x="258" y="310" font-size="26" fill="#1a1f2b">hoặc từ chối.</text>
+    <text x="64" y="366" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#5b6475">Sinatra · PostgreSQL 18 · e5-small · DeepSeek</text>
+  </g>
+
+  <g id="answer-card" transform="translate(640 48)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+    <rect width="496" height="208" rx="14" fill="#fff" stroke="#e3e6eb" stroke-width="2"/>
+    <text x="24" y="40" font-size="18" fill="#5b6475">Hỏi · tenant nus</text>
+    <text x="24" y="72" font-size="21" font-weight="600" fill="#1a1f2b">Hotel limit per night in a Tier 1 city?</text>
+    <text x="24" y="110" font-size="22" fill="#1a1f2b">USD 140 per night</text>
+    <rect x="214" y="91" width="30" height="26" rx="6" fill="#e8eefb"/>
+    <text x="229" y="110" font-size="18" font-weight="700" fill="#2453c7" text-anchor="middle">1</text>
+    <line x1="24" y1="132" x2="472" y2="132" stroke="#e3e6eb" stroke-width="2"/>
+    <text x="24" y="160" font-size="18" fill="#5b6475"><tspan font-weight="700" fill="#2453c7">[1]</tspan> Travel expense policy v1 · trang 2</text>
+    <rect x="24" y="172" width="262" height="26" rx="3" fill="#fde68a"/>
+    <text x="30" y="191" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#1a1f2b">… | USD 140 per night |</text>
+    <circle cx="310" cy="185" r="11" fill="#2453c7"/>
+    <path d="M304 185 l4 4 l8 -8" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="328" y="191" font-size="18" fill="#2453c7">đã xác minh</text>
+  </g>
+
+  <g id="refusal-card" transform="translate(640 272)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+    <rect width="496" height="112" rx="14" fill="#fff7e0" stroke="#f3d98b" stroke-width="2"/>
+    <text x="24" y="38" font-size="20" font-weight="600" fill="#1a1f2b">Công ty thưởng Tết bao nhiêu tháng lương?</text>
+    <text x="24" y="70" font-size="20" fill="#1a1f2b">Không tìm thấy thông tin này trong tài liệu.</text>
+    <text x="24" y="98" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#b7791f">hạng 1 &lt; min_score · không gọi LLM</text>
+  </g>
+</svg>

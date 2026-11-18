@@ -1,14 +1,50 @@
-# NUSAskify: hỏi đáp tài liệu nhiều tenant (RAG) bằng Ruby
+<p align="center">
+  <img src="docs/assets/readme/hero.svg" width="100%" alt="NUSAskify: hỏi đáp tài liệu PDF, DOCX theo từng tenant; mỗi câu trả lời kèm trích dẫn khớp từng chữ, hoặc từ chối khi tài liệu không có thông tin">
+</p>
 
-![Demo: hỏi có đáp án kèm nguồn, hỏi không có đáp án, bấm nguồn để mở trang đối chiếu](docs/assets/nusaskify-demo.gif)
+<p align="center">
+  <img src="docs/assets/nusaskify-demo.gif" width="100%" alt="Demo: hỏi có đáp án kèm nguồn, hỏi không có đáp án, bấm nguồn để mở trang đối chiếu">
+</p>
 
-## 1. Giới thiệu ngắn
+Nạp file PDF và Word (.docx) kèm metadata (tenant, tiêu đề, phiên bản, ngày hiệu lực), rồi hỏi bằng tiếng Việt hoặc tiếng Anh. Câu trả lời hiện dần và kèm nguồn: tài liệu, phiên bản, số trang, đoạn trích.
 
-Nạp file PDF và Word (.docx) kèm metadata (tenant, tiêu đề, phiên bản, ngày hiệu lực), rồi hỏi bằng tiếng Việt hoặc tiếng Anh. Câu trả lời hiện dần và kèm nguồn: tài liệu, phiên bản, số trang, đoạn trích. Đoạn trích được kiểm tra khớp từng chữ với đoạn đã nạp (bỏ qua dòng kẻ bảng `|---|`). Nếu tài liệu không có thông tin, app trả `Không tìm thấy thông tin này trong tài liệu.` (API: `not_enough_information`) và không gọi mô hình.
+- **Trích dẫn được kiểm bằng code.** Mỗi đoạn trích phải nằm nguyên văn trong đoạn đã nạp (bỏ qua dòng kẻ bảng `|---|`); không khớp thì `quote` là `null`.
+- **Không có thì nói không có.** Điểm truy xuất thấp hơn `min_score` thì trả `Không tìm thấy thông tin này trong tài liệu.` (API: `not_enough_information`) và không gọi mô hình.
+- **Tách tenant và phiên bản bằng SQL.** Lọc `tenant_id`, trạng thái và ngày hiệu lực ngay trong câu truy vấn vector, trước khi xếp hạng.
 
 Giao diện: trang chat (`/`) với checkbox chọn tài liệu theo tenant, bảng `Đoạn tìm được` kèm điểm tương đồng; các cuộc trò chuyện lưu trên trình duyệt (localStorage, tối đa 50, tách theo tenant). Trang `Tài liệu` (`/documents`) để tải lên, xem từng trang (chữ gốc và markdown), xóa.
 
-Công nghệ:
+> [!NOTE]
+> Quyền riêng tư: nội dung tài liệu, câu hỏi và lịch sử hội thoại gửi kèm được gửi tới endpoint DeepSeek khi nạp và khi trả lời. Mỗi câu hỏi và câu trả lời cũng được ghi vào bảng `query_logs` trong DB cục bộ. Mô hình tạo vector chạy cục bộ.
+
+**Mục lục:** [Chạy nhanh](#chạy-nhanh) · [Cách hoạt động](#cách-hoạt-động) · [Ví dụ](#ví-dụ) · [Cấu trúc](#cấu-trúc) · [Cấu hình](#cấu-hình) · [Chạy chi tiết](#chạy-chi-tiết) · [Kết quả đánh giá](#kết-quả-đánh-giá) · [Giới hạn và bảo mật](#giới-hạn-và-bảo-mật) · [Đưa lõi vào hệ thống thật](#đưa-lõi-vào-hệ-thống-thật)
+
+## Chạy nhanh
+
+Cần Docker với Compose v2.24 trở lên. Mọi lệnh chạy từ thư mục gốc repo.
+
+```bash
+cp .env.example .env                           # điền DEEPSEEK_API_KEY và DEEPSEEK_API_BASE
+docker compose run --rm app scripts/ingest     # tự khởi động DB, tải mô hình một lần, nạp 5 file mẫu
+docker compose up -d
+# chờ docker compose logs app hiện "Listening on http://0.0.0.0:4567", rồi mở http://localhost:4567
+```
+
+Nạp TRƯỚC `up -d` để hai container không cùng tải mô hình vào một cache.
+
+Thử ngay:
+
+- `Ngày phép năm ngoái dùng không hết thì được giữ lại sang năm nay mấy ngày?` (tenant `nus`, tìm theo nghĩa, nguồn `Quy chế nghỉ phép v2 · trang 2`).
+- `Công ty thưởng Tết bao nhiêu tháng lương?` (không có đáp án, không gọi mô hình).
+- Đổi sang `acme` và hỏi `Một tuần được làm việc từ xa tối đa mấy ngày?` (nus: 2 ngày, acme: 4 ngày).
+- Tải `data/samples/upload-demo/chinh-sach-hoan-tien.docx` lên rồi hỏi về hoàn tiền.
+- Bấm vào nguồn `[1]` để mở trang tài liệu hai cột (chữ gốc, markdown) đối chiếu.
+
+## Cách hoạt động
+
+<p align="center">
+  <img src="docs/assets/readme/answer-gates.svg" width="100%" alt="Đường đi của một câu hỏi: truy xuất có lọc SQL, cổng min_score, DeepSeek trả lời, code kiểm tra trích dẫn khớp từng chữ; điểm thấp hoặc NOT_FOUND thì trả not_enough_information">
+</p>
 
 | Thành phần | Lựa chọn |
 |---|---|
@@ -20,39 +56,6 @@ Công nghệ:
 | API | Sinatra JSON, Swagger UI ở `/api/docs` (`swagger-ui-dist@5.17.14` từ CDN) |
 | Chạy | Docker Compose: `app`, `db`, `adminer` |
 
-Quyền riêng tư: nội dung tài liệu, câu hỏi và lịch sử hội thoại gửi kèm được gửi tới endpoint DeepSeek khi nạp và khi trả lời. Mỗi câu hỏi và câu trả lời cũng được ghi vào bảng `query_logs` trong DB cục bộ. Mô hình tạo vector chạy cục bộ.
-
-## 2. Structure
-
-```
-src/
-  rag.rb           module Rag: lỗi, kiểu dữ liệu (Page, Chunk, Doc, Hit), hằng số đọc từ config/*.yaml; require mọi file còn lại (trừ web/)
-  config.rb        Rag::Config (đọc biến môi trường) và Rag.build (ghép store, embedder, llm, ingest, ask, retriever)
-  text.rb          chuẩn hóa chữ (NFC, squash, so khớp trích dẫn)
-  ingestion/       extract (rút chữ từng trang), restructurer (DeepSeek dựng lại trang), ingest, upload, manifest, metadata
-  chunking/        chunker (structure: tiêu đề, đoạn văn, bảng), semantic_chunker (cắt khi ngữ nghĩa đổi)
-  embeddings/      embedder (multilingual-e5-small cục bộ)
-  vectordb/        store (Postgres + pgvector: migrate, search, query_logs)
-  retrieval/       retriever (embed câu hỏi, gọi store.search)
-  prompts/         answer_prompt, restructure_prompt, rewrite_prompt
-  generation/      deepseek (client LLM, stream), ask (cổng min_score, trả lời, kiểm tra trích dẫn)
-  web/             app.rb (trang web, POST /ask dạng SSE), api.rb + openapi.yaml (/api/*), worker.rb (xử lý nền), views/*.erb
-config/            llm.yaml, retriever.yaml, tenants.yaml, puma.rb
-scripts/           ingest, ask, build_samples, test; spikes/ (thử nghiệm, RESULTS.md)
-evaluation/        questions.yml, check_retrieval, compare_chunking, run_tc
-tests/             *_test.rb (minitest); support/ (fake store, fixture), web/ (test route và API)
-data/
-  raw/             tài liệu nạp bằng scripts/ingest; uploads/<tenant>/ chứa file tải lên
-  samples/         nguồn tạo file mẫu: src/*.html, manifest.yml (metadata), upload-demo/
-config.ru          khởi động app: Rag.build rồi gắn vào Web
-Dockerfile         ruby:3.4-slim, poppler-utils, LibreOffice Writer, font; chạy bằng user thường (uid 1000)
-docker-compose.yml app, db (pgvector/pgvector:pg18-trixie), adminer (http://localhost:8081)
-```
-
-Các file ở gốc khác: `Gemfile`, `.env.example`.
-
-## 3. How it works
-
 ### Nạp tài liệu (ingestion)
 
 1. Tải lên (web, `POST /api/documents`) hoặc `scripts/ingest` (metadata lấy từ `data/samples/manifest.yml`). Metadata sai thì từ chối, không lưu gì. Tải lên trả `202` ngay, một worker xử lý nền; trạng thái `processing` rồi `done` hoặc `error`.
@@ -63,28 +66,6 @@ Các file ở gốc khác: `Gemfile`, `.env.example`.
 6. Store: `finish_document` ghi trang, đoạn và trạng thái `done` trong một giao dịch; đồng thời các phiên bản thấp hơn của cùng `(tenant_id, title)` chuyển sang `expired`.
 
 Chạy lại với file không đổi (cùng sha256, trạng thái `done` hoặc `expired`) thì bỏ qua và không tốn lệnh gọi trả phí; nếu chỉ ngày hiệu lực khác thì chỉ cập nhật ngày (bản `expired` giữ nguyên).
-
-### Hỏi đáp (query)
-
-1. Nếu có lịch sử hội thoại (tối đa 3 lượt gần nhất từ trình duyệt), một lệnh gọi LLM viết lại câu hỏi nối tiếp thành câu độc lập (hiện dưới dòng `Hiểu là:`). Lượt đầu và `/api/ask` dùng nguyên câu hỏi.
-2. Retrieve: embed câu hỏi, lọc SQL theo `tenant_id`, `status = done`, còn hiệu lực hôm nay, thuộc `document_ids` (rỗng là mọi tài liệu của tenant), rồi lấy `top_k` đoạn gần nhất.
-3. Cổng `min_score`: nếu điểm hạng 1 (`1 - khoảng cách cosine`) thấp hơn ngưỡng thì trả `not_enough_information`, KHÔNG gọi LLM.
-4. Generate: DeepSeek trả lời chỉ từ các đoạn tìm được, rồi in khối trích dẫn sau dấu `<<QUOTES>>` (bị lọc khỏi stream). Code kiểm tra từng đoạn trích có nằm nguyên văn trong đoạn được dẫn; không xác minh được thì `quote` là `null`. Mô hình trả `NOT_FOUND` hoặc không dẫn nguồn nào cũng thành `not_enough_information`.
-5. Mỗi câu hỏi (kể cả câu bị chặn) được ghi vào `query_logs`.
-
-Retrieval và generation tách riêng: `/api/search` chỉ chạy đến bước retrieve (không tốn tiền, không áp `min_score`), `/api/ask` chạy hết. Nhờ đó biết lỗi ở đâu: đoạn đúng không có trong `/api/search` thì lỗi truy xuất, có mà câu trả lời sai thì lỗi sinh.
-
-### Multi-tenant
-
-Tenant lấy từ `config/tenants.yaml`. Mọi `/api/*` (trừ `/api/docs`, `/api/openapi.yaml`) đọc header `X-Tenant-Id`; thiếu hoặc không thuộc danh sách thì 400. Cô lập bằng điều kiện SQL `tenant_id` trong cùng câu truy vấn vector, trước khi xếp hạng. `document_ids` thuộc tenant khác hoặc không tồn tại trả danh sách rỗng, không rơi về "mọi tài liệu". Đây là mô phỏng tenant, không phải xác thực (xem mục 8).
-
-### Hiệu lực tài liệu
-
-Mỗi tài liệu có `version`, `valid_from`, `valid_to`, `status` (`processing`, `done`, `expired`, `error`). Chỉ đoạn của tài liệu `done` và còn hiệu lực vào ngày hỏi (ngày của server) mới được tìm. Khi một phiên bản mới nạp xong, bản cũ hơn cùng tenant và title thành `expired`. `UNIQUE (tenant_id, title, version)`: nạp lại cùng bộ ba nhưng file khác thì thay bản ghi cũ.
-
-## 4. Workflows / diagram
-
-### Nạp tài liệu
 
 ```mermaid
 flowchart TD
@@ -100,7 +81,18 @@ flowchart TD
   DB --> EXP[Bản cũ hơn cùng tenant và title chuyển sang expired]
 ```
 
-### Hỏi đáp
+### Hỏi đáp (query)
+
+1. Nếu có lịch sử hội thoại (tối đa 3 lượt gần nhất từ trình duyệt), một lệnh gọi LLM viết lại câu hỏi nối tiếp thành câu độc lập (hiện dưới dòng `Hiểu là:`). Lượt đầu và `/api/ask` dùng nguyên câu hỏi.
+2. Retrieve: embed câu hỏi, lọc SQL theo `tenant_id`, `status = done`, còn hiệu lực hôm nay, thuộc `document_ids` (rỗng là mọi tài liệu của tenant), rồi lấy `top_k` đoạn gần nhất.
+3. Cổng `min_score`: nếu điểm hạng 1 (`1 - khoảng cách cosine`) thấp hơn ngưỡng thì trả `not_enough_information`, KHÔNG gọi LLM.
+4. Generate: DeepSeek trả lời chỉ từ các đoạn tìm được, rồi in khối trích dẫn sau dấu `<<QUOTES>>` (bị lọc khỏi stream). Code kiểm tra từng đoạn trích có nằm nguyên văn trong đoạn được dẫn; không xác minh được thì `quote` là `null`. Mô hình trả `NOT_FOUND` hoặc không dẫn nguồn nào cũng thành `not_enough_information`.
+5. Mỗi câu hỏi (kể cả câu bị chặn) được ghi vào `query_logs`.
+
+Retrieval và generation tách riêng: `/api/search` chỉ chạy đến bước retrieve (không tốn tiền, không áp `min_score`), `/api/ask` chạy hết. Nhờ đó biết lỗi ở đâu: đoạn đúng không có trong `/api/search` thì lỗi truy xuất, có mà câu trả lời sai thì lỗi sinh.
+
+<details>
+<summary>Sơ đồ tuần tự của một câu hỏi</summary>
 
 ```mermaid
 sequenceDiagram
@@ -132,7 +124,18 @@ sequenceDiagram
   W-->>U: SSE (delta, done) hoặc JSON
 ```
 
-### Cơ sở dữ liệu
+</details>
+
+### Multi-tenant
+
+Tenant lấy từ `config/tenants.yaml`. Mọi `/api/*` (trừ `/api/docs`, `/api/openapi.yaml`) đọc header `X-Tenant-Id`; thiếu hoặc không thuộc danh sách thì 400. Cô lập bằng điều kiện SQL `tenant_id` trong cùng câu truy vấn vector, trước khi xếp hạng. `document_ids` thuộc tenant khác hoặc không tồn tại trả danh sách rỗng, không rơi về "mọi tài liệu". Đây là mô phỏng tenant, không phải xác thực (xem [Giới hạn và bảo mật](#giới-hạn-và-bảo-mật)).
+
+### Hiệu lực tài liệu
+
+Mỗi tài liệu có `version`, `valid_from`, `valid_to`, `status` (`processing`, `done`, `expired`, `error`). Chỉ đoạn của tài liệu `done` và còn hiệu lực vào ngày hỏi (ngày của server) mới được tìm. Khi một phiên bản mới nạp xong, bản cũ hơn cùng tenant và title thành `expired`. `UNIQUE (tenant_id, title, version)`: nạp lại cùng bộ ba nhưng file khác thì thay bản ghi cũ.
+
+<details>
+<summary>Cơ sở dữ liệu</summary>
 
 ```mermaid
 erDiagram
@@ -185,11 +188,29 @@ erDiagram
 
 `documents` có `UNIQUE (tenant_id, title, version)`; `pages` và `chunks` xóa theo `documents` (`ON DELETE CASCADE`). `query_logs` không có khóa ngoại và không tự xóa.
 
-## 5. Example
+</details>
+
+## Ví dụ
 
 Mọi `/api/*` cần `X-Tenant-Id` (`nus` hoặc `acme`). Tài liệu đầy đủ và "Try it out" ở http://localhost:4567/api/docs. Lỗi luôn dạng `{"error": "..."}` (400 thiếu tenant hoặc body sai, 404, 413, 422 metadata hoặc file sai, 502 lỗi LLM, 500).
 
-### API
+Hỏi đáp (gọi LLM):
+
+```bash
+curl -s -X POST localhost:4567/api/ask -H 'X-Tenant-Id: nus' -H 'content-type: application/json' \
+  -d '{"question":"What is the hotel limit per night in a Tier 1 city?","document_ids":[5]}'
+```
+```json
+{"status": "answered", "answer": "... USD 140 per night ... [S1]",
+ "citations": [{"n": 1, "chunk_id": 111, "document_id": 5, "title": "Travel expense policy", "version": 1, "page": 2,
+   "quote": "| Tier 1 (capital cities and major financial centres) | USD 140 per night | USD 60 per day |"}],
+ "chunks": [{"chunk_id": 111, "document_id": 5, "title": "Travel expense policy", "version": 1, "page": 2, "score": 0.9, "content": "..."}]}
+```
+
+Khi bị cổng chặn: `{"status": "not_enough_information", "answer": "Not enough information in the documents.", "citations": [], "chunks": [...]}` (`chunks` vẫn liệt kê các đoạn đã tìm được).
+
+<details>
+<summary>Các endpoint khác: liệt kê, tải lên, xem đoạn, chỉ truy xuất, xóa</summary>
 
 ```bash
 # liệt kê (thêm ?current=true để chỉ lấy bản còn hiệu lực)
@@ -228,26 +249,14 @@ curl -s -X POST localhost:4567/api/search -H 'X-Tenant-Id: nus' -H 'content-type
 ```
 
 ```bash
-# hỏi đáp (gọi LLM)
-curl -s -X POST localhost:4567/api/ask -H 'X-Tenant-Id: nus' -H 'content-type: application/json' \
-  -d '{"question":"What is the hotel limit per night in a Tier 1 city?","document_ids":[5]}'
-```
-```json
-{"status": "answered", "answer": "... USD 140 per night ... [S1]",
- "citations": [{"n": 1, "chunk_id": 111, "document_id": 5, "title": "Travel expense policy", "version": 1, "page": 2,
-   "quote": "| Tier 1 (capital cities and major financial centres) | USD 140 per night | USD 60 per day |"}],
- "chunks": [{"chunk_id": 111, "document_id": 5, "title": "Travel expense policy", "version": 1, "page": 2, "score": 0.9, "content": "..."}]}
-```
-
-Khi bị cổng chặn: `{"status": "not_enough_information", "answer": "Not enough information in the documents.", "citations": [], "chunks": [...]}` (`chunks` vẫn liệt kê các đoạn đã tìm được).
-
-```bash
 # xóa (chỉ gỡ file dưới data/raw/uploads/, không đụng file mẫu)
 curl -s -X DELETE localhost:4567/api/documents/6 -H 'X-Tenant-Id: nus'
 ```
 ```json
 {"id": 6, "deleted": true}
 ```
+
+</details>
 
 Giá trị trong JSON trên là minh họa cho hình dạng; `score` là `1 - khoảng cách cosine`, làm tròn 3 chữ số. Giới hạn: file 30 MB (`max_upload_mb`), thân JSON 64 KB, câu hỏi tối đa 2000 ký tự, `document_ids` tối đa 200.
 
@@ -261,20 +270,56 @@ docker compose run --rm app scripts/ask "Nghỉ phép năm được chuyển t�
 
 `scripts/ask` in câu trả lời rồi từng nguồn `[n] tiêu đề vN · trang P — "đoạn trích"`; không có đáp án thì in `Không tìm thấy thông tin này trong tài liệu.`
 
-## 6. Config
+## Cấu trúc
 
-Cấu hình không bí mật nằm trong `config/*.yaml`; thiếu khóa hoặc sai kiểu thì lỗi ngay khi nạp lõi.
+```
+src/
+  rag.rb           module Rag: lỗi, kiểu dữ liệu (Page, Chunk, Doc, Hit), hằng số đọc từ config/*.yaml; require mọi file còn lại (trừ web/)
+  config.rb        Rag::Config (đọc biến môi trường) và Rag.build (ghép store, embedder, llm, ingest, ask, retriever)
+  text.rb          chuẩn hóa chữ (NFC, squash, so khớp trích dẫn)
+  ingestion/       extract (rút chữ từng trang), restructurer (DeepSeek dựng lại trang), ingest, upload, manifest, metadata
+  chunking/        chunker (structure: tiêu đề, đoạn văn, bảng), semantic_chunker (cắt khi ngữ nghĩa đổi)
+  embeddings/      embedder (multilingual-e5-small cục bộ)
+  vectordb/        store (Postgres + pgvector: migrate, search, query_logs)
+  retrieval/       retriever (embed câu hỏi, gọi store.search)
+  prompts/         answer_prompt, restructure_prompt, rewrite_prompt
+  generation/      deepseek (client LLM, stream), ask (cổng min_score, trả lời, kiểm tra trích dẫn)
+  web/             app.rb (trang web, POST /ask dạng SSE), api.rb + openapi.yaml (/api/*), worker.rb (xử lý nền), views/*.erb
+config/            llm.yaml, retriever.yaml, tenants.yaml, puma.rb
+scripts/           ingest, ask, build_samples, test; spikes/ (thử nghiệm, RESULTS.md)
+evaluation/        questions.yml, check_retrieval, compare_chunking, run_tc
+tests/             *_test.rb (minitest); support/ (fake store, fixture), web/ (test route và API)
+data/
+  raw/             tài liệu nạp bằng scripts/ingest; uploads/<tenant>/ chứa file tải lên
+  samples/         nguồn tạo file mẫu: src/*.html, manifest.yml (metadata), upload-demo/
+config.ru          khởi động app: Rag.build rồi gắn vào Web
+Dockerfile         ruby:3.4-slim, poppler-utils, LibreOffice Writer, font; chạy bằng user thường (uid 1000)
+docker-compose.yml app, db (pgvector/pgvector:pg18-trixie), adminer (http://localhost:8081)
+```
 
-### config/llm.yaml
+Các file ở gốc khác: `Gemfile`, `.env.example`.
 
-| Khóa | Giá trị hiện tại | Ý nghĩa |
+## Cấu hình
+
+Cấu hình không bí mật nằm trong `config/*.yaml`; thiếu khóa hoặc sai kiểu thì lỗi ngay khi nạp lõi. Hai khóa hay chỉnh nhất: `min_score` (ngưỡng chặn) và `chunking` (cách chia đoạn), cả hai ở `config/retriever.yaml`.
+
+### Biến môi trường
+
+| Biến | Mặc định | Ý nghĩa |
 |---|---|---|
-| `default_model` | `deepseek-flash` | Mô hình mặc định; `DEEPSEEK_MODEL` ghi đè |
-| `temperature` | `0.3` | Nhiệt độ lấy mẫu của LLM |
-| `read_timeout` | `120` | Giây chờ phản hồi LLM |
-| `disable_reasoning` | `true` | Tắt chế độ suy nghĩ (gửi `reasoning: {enabled: false}`) để chữ đầu hiện nhanh hơn |
+| `DEEPSEEK_API_KEY` | (bắt buộc) | Key của endpoint LLM |
+| `DEEPSEEK_API_BASE` | (bắt buộc) | Địa chỉ gốc endpoint, không có `/` cuối; code chỉ nối `/chat/completions` |
+| `DEEPSEEK_MODEL` | `default_model` trong `llm.yaml` | Mã mô hình |
+| `DATABASE_URL` | compose đặt `postgres://rag:rag@db:5432/rag` | Kết nối Postgres |
+| `DOCUMENTS_DIR` | `data/raw` | Thư mục `scripts/ingest` quét và nơi `uploads/` nằm |
+| `PUBLIC_HOST` | (trống: chỉ localhost) | Host phụ được phép, ví dụ miền ngrok (phân tách bằng dấu phẩy); chỉ đọc và chat |
+| `TEST_DATABASE_URL` | compose đặt `.../rag_test` | DB cho `scripts/test` |
+| `XDG_CACHE_HOME` | compose đặt `/cache` | Cache mô hình embedding (volume `models`) |
 
-### config/retriever.yaml
+`DEEPSEEK_API_KEY` và `DEEPSEEK_API_BASE` thiếu thì app thoát ngay với thông báo tiếng Việt. Mẫu ở `.env.example`; không commit `.env`. Endpoint công ty là gateway (LiteLLM phía trước OpenRouter) và từ chối trường `thinking`; code gửi `reasoning: {enabled: false}`.
+
+<details>
+<summary><code>config/retriever.yaml</code></summary>
 
 | Khóa | Giá trị hiện tại | Ý nghĩa |
 |---|---|---|
@@ -293,33 +338,33 @@ Cấu hình không bí mật nằm trong `config/*.yaml`; thiếu khóa hoặc s
 | `semantic_floor` | `0.85` | Sàn tương đồng cho điểm cắt của chia đoạn semantic |
 | `semantic_min_units` | `5` | Số câu tối thiểu trước khi được cắt (tối thiểu 2) |
 
-### config/tenants.yaml
+</details>
+
+<details>
+<summary><code>config/llm.yaml</code>, <code>config/tenants.yaml</code>, <code>config/puma.rb</code></summary>
+
+`config/llm.yaml`:
+
+| Khóa | Giá trị hiện tại | Ý nghĩa |
+|---|---|---|
+| `default_model` | `deepseek-flash` | Mô hình mặc định; `DEEPSEEK_MODEL` ghi đè |
+| `temperature` | `0.3` | Nhiệt độ lấy mẫu của LLM |
+| `read_timeout` | `120` | Giây chờ phản hồi LLM |
+| `disable_reasoning` | `true` | Tắt chế độ suy nghĩ (gửi `reasoning: {enabled: false}`) để chữ đầu hiện nhanh hơn |
+
+`config/tenants.yaml`:
 
 | Khóa | Giá trị hiện tại | Ý nghĩa |
 |---|---|---|
 | `tenants` | `[nus, acme]` | Danh sách tenant hợp lệ |
 | `default` | `nus` | Tenant mặc định của web và CLI (phải thuộc `tenants`) |
 
-### config/puma.rb
+`config/puma.rb`: `http_content_length_limit 32 * 1024 * 1024`: 30 MB file cộng phần multipart; Puma từ chối Content-Length lớn hơn trước khi đọc thân.
 
-`http_content_length_limit 32 * 1024 * 1024`: 30 MB file cộng phần multipart; Puma từ chối Content-Length lớn hơn trước khi đọc thân.
+</details>
 
-### Biến môi trường
-
-| Biến | Mặc định | Ý nghĩa |
-|---|---|---|
-| `DEEPSEEK_API_KEY` | (bắt buộc) | Key của endpoint LLM |
-| `DEEPSEEK_API_BASE` | (bắt buộc) | Địa chỉ gốc endpoint, không có `/` cuối; code chỉ nối `/chat/completions` |
-| `DEEPSEEK_MODEL` | `default_model` trong `llm.yaml` | Mã mô hình |
-| `DATABASE_URL` | compose đặt `postgres://rag:rag@db:5432/rag` | Kết nối Postgres |
-| `DOCUMENTS_DIR` | `data/raw` | Thư mục `scripts/ingest` quét và nơi `uploads/` nằm |
-| `PUBLIC_HOST` | (trống: chỉ localhost) | Host phụ được phép, ví dụ miền ngrok (phân tách bằng dấu phẩy); chỉ đọc và chat |
-| `TEST_DATABASE_URL` | compose đặt `.../rag_test` | DB cho `scripts/test` |
-| `XDG_CACHE_HOME` | compose đặt `/cache` | Cache mô hình embedding (volume `models`) |
-
-`DEEPSEEK_API_KEY` và `DEEPSEEK_API_BASE` thiếu thì app thoát ngay với thông báo tiếng Việt. Mẫu ở `.env.example`; không commit `.env`.
-
-### docker-compose.yml
+<details>
+<summary><code>docker-compose.yml</code></summary>
 
 | Service | Ghi chú |
 |---|---|
@@ -327,27 +372,11 @@ Cấu hình không bí mật nằm trong `config/*.yaml`; thiếu khóa hoặc s
 | `app` | build từ `Dockerfile`, cổng `127.0.0.1:4567`, mã nguồn mount chỉ đọc (`.:/app:ro`), chỉ `./data/raw` và `/cache` ghi được |
 | `adminer` | giao diện xem DB ở `127.0.0.1:8081` (server `db`, user, mật khẩu, DB đều `rag`) |
 
-## 7. How to run
+</details>
 
-Cần Docker với Compose v2.24 trở lên. Mọi lệnh chạy từ thư mục gốc repo.
+## Chạy chi tiết
 
-### Docker (khuyến nghị)
-
-Cài đặt một lần:
-
-```bash
-cp .env.example .env     # điền DEEPSEEK_API_KEY và DEEPSEEK_API_BASE
-```
-
-Endpoint công ty là gateway (LiteLLM phía trước OpenRouter) và từ chối trường `thinking`; code gửi `reasoning: {enabled: false}`.
-
-Nạp rồi chạy server (nạp TRƯỚC `up -d` để hai container không cùng tải mô hình vào một cache):
-
-```bash
-docker compose run --rm app scripts/ingest   # tự khởi động DB, tải mô hình một lần, nạp 5 file mẫu
-docker compose up -d
-# chờ docker compose logs app hiện "Listening on http://0.0.0.0:4567", rồi mở http://localhost:4567
-```
+### Docker
 
 - Lần đầu build image, tải image Postgres và mô hình mất vài phút; nạp 5 file mẫu gọi DeepSeek mỗi trang (20 trang).
 - `scripts/ingest` chạy lại thì bỏ qua file không đổi. File trong `data/raw/` không có trong manifest hiện `Bỏ qua (thiếu metadata)`. `scripts/ingest` không quét `data/raw/uploads/`.
@@ -357,7 +386,7 @@ docker compose up -d
 
 ### Chạy local (không Docker)
 
-Cần Ruby 3.4, `bundle install`, `poppler-utils`, LibreOffice Writer (chỉ cho `.docx`), một Postgres có pgvector, và các biến môi trường ở mục 6 (`DATABASE_URL` là bắt buộc để dựng store). Khi đó:
+Cần Ruby 3.4, `bundle install`, `poppler-utils`, LibreOffice Writer (chỉ cho `.docx`), một Postgres có pgvector, và các biến môi trường ở [Cấu hình](#biến-môi-trường) (`DATABASE_URL` là bắt buộc để dựng store). Khi đó:
 
 ```bash
 scripts/ingest
@@ -366,19 +395,14 @@ bundle exec rackup -s puma -o 127.0.0.1 -p 4567 config.ru
 
 Đường này chưa được kiểm chứng trong repo: Docker là cách chạy được hỗ trợ.
 
-### Test
+### Test và evaluation
 
 ```bash
-docker compose run --rm app scripts/test                 # toàn bộ test, không gọi DeepSeek, không tải mô hình
+docker compose run --rm app scripts/test                     # toàn bộ test, không gọi DeepSeek, không tải mô hình
 docker compose run --rm app scripts/test tests/ask_test.rb   # một file
-```
-
-### Evaluation
-
-```bash
-docker compose run --rm app evaluation/check_retrieval    # hạng, điểm top-1, cơ sở chọn min_score
-docker compose run --rm app evaluation/compare_chunking   # semantic so với structure
-docker compose run --rm app evaluation/run_tc             # TC1 đến TC8 (cần dữ liệu mẫu đã nạp; TC1 và TC7 gọi DeepSeek)
+docker compose run --rm app evaluation/check_retrieval       # hạng, điểm top-1, cơ sở chọn min_score
+docker compose run --rm app evaluation/compare_chunking      # semantic so với structure
+docker compose run --rm app evaluation/run_tc                # TC1 đến TC8 (cần dữ liệu mẫu đã nạp; TC1 và TC7 gọi DeepSeek)
 ```
 
 Câu hỏi còn lại trong `evaluation/questions.yml` (`file`, `contains`) không đánh giá tự động: hỏi tay rồi so.
@@ -393,26 +417,24 @@ docker run --rm -v "$PWD:/app" -w /app app scripts/build_samples   # tạo lại
 
 Không sửa tay các file đó. Nếu file tạo lại khác byte (sha256 đổi), lần `scripts/ingest` sau sẽ nạp lại và tốn lệnh gọi trả phí.
 
-### Demo nhanh
+### Xử lý sự cố
 
-Hỏi `Ngày phép năm ngoái dùng không hết thì được giữ lại sang năm nay mấy ngày?` (tenant `nus`, tìm theo nghĩa, nguồn `Quy chế nghỉ phép v2 · trang 2`); `Công ty thưởng Tết bao nhiêu tháng lương?` (không có đáp án, không gọi mô hình); đổi sang `acme` và hỏi `Một tuần được làm việc từ xa tối đa mấy ngày?` (nus: 2 ngày, acme: 4 ngày); tải `data/samples/upload-demo/chinh-sach-hoan-tien.docx` lên rồi hỏi về hoàn tiền. Bấm vào nguồn `[1]` để mở trang tài liệu hai cột (chữ gốc, markdown) đối chiếu.
+- 403 trên trình duyệt: đang vào bằng tên máy không phải `localhost`, `127.0.0.1`, `[::1]` (hoặc `PUBLIC_HOST`). Dùng `http://localhost:4567`.
+- Container web thoát ngay khi khởi động: thiếu `.env` hoặc thiếu biến; thông báo ở `docker compose logs app`.
+- Trang chỉ hiện `Không thể trả lời lúc này. Vui lòng thử lại sau.`: sai key hoặc endpoint; lý do ở `docker compose logs app`.
+- File PDF scan: không có OCR; file toàn trang không đọc được báo `file scan, không đọc được`.
+- Tài liệu `lỗi: bị gián đoạn, hãy tải lại file hoặc chạy lại lệnh nạp` (khởi động lại giữa lúc xử lý): chạy lại `scripts/ingest` hoặc tải lên lại.
+- `Cơ sở dữ liệu có schema cũ` hoặc đổi `embed_model`: `docker compose down -v` rồi nạp lại.
+- `docker compose down -v` không xóa file trong `data/raw/uploads/`: xóa bằng nút xóa hoặc `DELETE /api/documents/:id` trước.
 
-## 8. Các điểm đáng chú ý
+## Kết quả đánh giá
 
-### Kết quả đánh giá
+Đo trên 5 tài liệu mẫu nạp từ trạng thái trống (tenant `nus` có 3 tài liệu hiện hành, `chunking: semantic`).
 
-Đo trên 5 tài liệu mẫu nạp từ trạng thái trống (tenant `nus` có 3 tài liệu hiện hành, `chunking: semantic`). Lưu ý: các số này đo khi `top_k = 6`; `config/retriever.yaml` hiện là `10` (đổi tay, chưa đo lại). Thông báo của `check_retrieval` và `run_tc` vẫn ghi "top 6" cố định dù code dùng `top_k` hiện hành.
+> [!WARNING]
+> Các số này đo khi `top_k = 6`; `config/retriever.yaml` hiện là `10` (đổi tay, chưa đo lại). Thông báo của `check_retrieval` và `run_tc` vẫn ghi "top 6" cố định dù code dùng `top_k` hiện hành.
 
 **Ngưỡng `min_score`.** `check_retrieval`: `answerable top-1 min=0.851 | unanswerable top-1 max=0.832 | in top 6: 12/12`. `min_score = 0.84` là trung điểm 0,832 và 0,851 (0,8415). Hai khoảng không chồng nhau nhưng biên mỏng (khoảng 0,01 mỗi phía): câu hỏi mới có thể bị chặn nhầm hoặc lọt. `/api/search` không áp ngưỡng nên số không đổi khi chỉnh.
-
-**Semantic so với structure** (11 câu có đáp án):
-
-| strategy | số đoạn | ký tự trung bình | hit@6 | hạng đoạn đúng |
-|---|---|---|---|---|
-| structure | 22 | 587 | 11/11 | 1,1,1,2,1,1,1,1,1,1,1 |
-| semantic (percentile 25, sàn 0,85, tối thiểu 5 đơn vị) | 74 | 173 | 11/11 | 1,1,2,1,1,1,1,1,1,1,1 |
-
-Hai cách ngang nhau trên bộ này; semantic cho đoạn nhỏ hơn khoảng 3,4 lần (mỗi đoạn một ý) nhưng nhiều đoạn hơn và tốn embedding từng câu lúc nạp. Mẫu quá nhỏ để kết luận semantic chính xác hơn. Semantic là mặc định, `structure` giữ để so sánh.
 
 **TC1 đến TC8** (`run_tc`, thoát mã 0):
 
@@ -429,15 +451,16 @@ Hai cách ngang nhau trên bộ này; semantic cho đoạn nhỏ hơn khoảng 3
 
 **TC8.** Câu `Chi phí khách sạn vượt mức trần thì ai trả?` (tiếng Việt) hỏi về mục 2.5 của `Travel expense policy` (tiếng Anh): đoạn đáp án (chunk 111) không có cả trong top 20; hạng 1 (0,826) là đoạn "hỗ trợ chi phí" của tài liệu làm việc từ xa, chỉ trùng chữ "chi phí". Chẩn đoán: LỖI TRUY XUẤT, không phải lỗi sinh, vì LLM chưa hề thấy đoạn đúng. Nguyên nhân khả dĩ (chưa kiểm chứng riêng): khác ngôn ngữ nên điểm thấp. `/api/ask` trả `not_enough_information` vì 0,826 < 0,84: cổng chặn đúng việc (không bịa) nhưng người dùng nhận "không tìm thấy" dù tài liệu có đáp án. Cách tránh: hỏi bằng tiếng Anh, hoặc thêm bước dịch hay viết lại câu hỏi (chưa làm). Cách phân biệt lỗi: gọi `/api/search` với đúng câu hỏi và xem đoạn đúng có trong danh sách không.
 
-### Xử lý sự cố
+**Semantic so với structure** (11 câu có đáp án):
 
-- 403 trên trình duyệt: đang vào bằng tên máy không phải `localhost`, `127.0.0.1`, `[::1]` (hoặc `PUBLIC_HOST`). Dùng `http://localhost:4567`.
-- Container web thoát ngay khi khởi động: thiếu `.env` hoặc thiếu biến; thông báo ở `docker compose logs app`.
-- Trang chỉ hiện `Không thể trả lời lúc này. Vui lòng thử lại sau.`: sai key hoặc endpoint; lý do ở `docker compose logs app`.
-- File PDF scan: không có OCR; file toàn trang không đọc được báo `file scan, không đọc được`.
-- Tài liệu `lỗi: bị gián đoạn, hãy tải lại file hoặc chạy lại lệnh nạp` (khởi động lại giữa lúc xử lý): chạy lại `scripts/ingest` hoặc tải lên lại.
-- `Cơ sở dữ liệu có schema cũ` hoặc đổi `embed_model`: `docker compose down -v` rồi nạp lại.
-- `docker compose down -v` không xóa file trong `data/raw/uploads/`: xóa bằng nút xóa hoặc `DELETE /api/documents/:id` trước.
+| strategy | số đoạn | ký tự trung bình | hit@6 | hạng đoạn đúng |
+|---|---|---|---|---|
+| structure | 22 | 587 | 11/11 | 1,1,1,2,1,1,1,1,1,1,1 |
+| semantic (percentile 25, sàn 0,85, tối thiểu 5 đơn vị) | 74 | 173 | 11/11 | 1,1,2,1,1,1,1,1,1,1,1 |
+
+Hai cách ngang nhau trên bộ này; semantic cho đoạn nhỏ hơn khoảng 3,4 lần (mỗi đoạn một ý) nhưng nhiều đoạn hơn và tốn embedding từng câu lúc nạp. Mẫu quá nhỏ để kết luận semantic chính xác hơn. Semantic là mặc định, `structure` giữ để so sánh.
+
+## Giới hạn và bảo mật
 
 ### Giới hạn đã biết
 
@@ -458,7 +481,7 @@ Hai cách ngang nhau trên bộ này; semantic cho đoạn nhỏ hơn khoảng 3
 - Khi đặt `PUBLIC_HOST` (ví dụ miền ngrok), host công khai đó chỉ đọc và chat (`POST /ask`); tải lên, xóa và mọi `/api` ghi bị từ chối 403 vì app không có đăng nhập. Không chạy tunnel với `--host-header=rewrite`: yêu cầu công khai sẽ trông như cục bộ.
 - Container chạy user thường, mã nguồn mount chỉ đọc; JSON API không ghi nội dung lỗi (chỉ tên lớp) vào log; Swagger UI tải từ CDN với SRI.
 
-### Đưa lõi vào hệ thống thật
+## Đưa lõi vào hệ thống thật
 
 Lõi là TOÀN BỘ `src/` trừ `src/web/`. Chưa đóng gói thành gem: copy vào MỘT thư mục riêng (ví dụ `lib/rag/`), vì `rag.rb` tự `require` mọi `.rb` dưới thư mục của nó (trừ `web/`); loại thư mục đó khỏi autoloader (Rails/Zeitwerk) và chỉ `require` đúng `rag.rb`. Ba file `llm.yaml`, `retriever.yaml`, `tenants.yaml` phải nằm ở thư mục `config/` NGANG HÀNG (`rag.rb` đọc `File.expand_path("../config", __dir__)`; với `lib/rag/` là `lib/config/`). `src/web/`, `scripts/`, `evaluation/`, `config.ru` chỉ là phần demo.
 
