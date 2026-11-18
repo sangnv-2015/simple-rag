@@ -88,12 +88,12 @@ Mỗi tài liệu có `version`, `valid_from`, `valid_to`, `status` (`processing
 
 ```mermaid
 flowchart TD
-  F[File PDF/DOCX + metadata: tenant, title, version, valid_from, valid_to] --> V{Metadata hợp lệ?}
+  F["File PDF/DOCX + metadata: tenant, title, version, valid_from, valid_to"] --> V{Metadata hợp lệ?}
   V -- không --> R422[Từ chối, không lưu gì]
   V -- có --> S{Cùng sha256 và đã done/expired?}
   S -- có --> SK[Bỏ qua, chỉ cập nhật ngày hiệu lực nếu khác]
-  S -- không --> X[Rút chữ từng trang; DOCX đổi sang PDF]
-  X --> RS[DeepSeek dựng lại trang thành markdown; kiểm tra số liệu, hỏng thì giữ chữ gốc]
+  S -- không --> X["Rút chữ từng trang, DOCX đổi sang PDF"]
+  X --> RS["DeepSeek dựng lại trang thành markdown, kiểm tra số liệu, hỏng thì giữ chữ gốc"]
   RS --> CH[Chia đoạn semantic hoặc structure]
   CH --> EM[Embedding cục bộ, 384 chiều]
   EM --> DB[(PostgreSQL: documents, pages, chunks)]
@@ -118,7 +118,7 @@ sequenceDiagram
   end
   A->>E: embed_query
   E-->>A: vector 384 chiều
-  A->>D: lọc tenant, status = done, còn hiệu lực, document_ids; top_k theo cosine
+  A->>D: lọc tenant, status = done, còn hiệu lực, document_ids, top_k theo cosine
   D-->>A: các đoạn kèm điểm
   alt hạng 1 < min_score hoặc không có đoạn
     A-->>W: not_enough_information (không gọi LLM)
