@@ -1,6 +1,6 @@
 embed_model: Xenova/multilingual-e5-small
 embed_dim: 384
-top_k: 6
+top_k: 10 #6
 max_chunk_chars: 1000 # 1000 Vietnamese chars = 252 tokens (scripts/spikes/RESULTS.md)
 min_letters: 20
 min_quote_chars: 10

@@ -1,4 +1,4 @@
 default_model: deepseek-flash
-temperature: 0
+temperature: 0.3
 read_timeout: 120
 disable_reasoning: true
