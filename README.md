@@ -1,5 +1,7 @@
 # NUSAskify: hỏi đáp tài liệu nhiều tenant (RAG) bằng Ruby
 
+![Demo: hỏi có đáp án kèm nguồn, hỏi không có đáp án, bấm nguồn để mở trang đối chiếu](docs/assets/nusaskify-demo.gif)
+
 ## 1. Giới thiệu ngắn
 
 Nạp file PDF và Word (.docx) kèm metadata (tenant, tiêu đề, phiên bản, ngày hiệu lực), rồi hỏi bằng tiếng Việt hoặc tiếng Anh. Câu trả lời hiện dần và kèm nguồn: tài liệu, phiên bản, số trang, đoạn trích. Đoạn trích được kiểm tra khớp từng chữ với đoạn đã nạp (bỏ qua dòng kẻ bảng `|---|`). Nếu tài liệu không có thông tin, app trả `Không tìm thấy thông tin này trong tài liệu.` (API: `not_enough_information`) và không gọi mô hình.
